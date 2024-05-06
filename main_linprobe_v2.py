@@ -19,6 +19,7 @@ import os
 import time
 from pathlib import Path
 
+import psutil
 import torch
 import torch.backends.cudnn as cudnn
 from timm.utils import accuracy
@@ -26,9 +27,12 @@ from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-
+from torch.utils.data import TensorDataset
 import timm
+import gc
+import nvidia_smi
 
+nvidia_smi.nvmlInit()
 # assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from tqdm import tqdm
@@ -49,6 +53,8 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=512, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=90, type=int)
+    parser.add_argument("--aug_every", type=int, default=None)
+
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
@@ -78,17 +84,16 @@ def get_args_parser():
     parser.set_defaults(global_pool=False)
     parser.add_argument('--cls_token', action='store_false', dest='global_pool',
                         help='Use class token instead of global pool for classification')
-
+    parser.add_argument("--n_last_layers", type=int, default=1, help="Use activations from N last layers for classification")
+    parser.add_argument("--shuffle_subsets", type=int, default=1, help="Shuffle positional tokens into N subsets during inference")
     # Dataset parameters
     parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
                         help='dataset path')
     parser.add_argument('--nb_classes', default=1000, type=int,
                         help='number of the classification types')
 
-    parser.add_argument('--output_dir', default='./output_dir',
+    parser.add_argument('--output_dir', default=None,
                         help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='./output_dir',
-                        help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
@@ -115,11 +120,13 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
 
+
     return parser
 
 
 def main(args):
     # misc.init_distributed_mode(args)
+    args.aug_every = args.aug_every or args.epochs
 
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
@@ -128,6 +135,7 @@ def main(args):
 
     # fix the seed for reproducibility
     seed = args.seed + misc.get_rank()
+
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -171,23 +179,30 @@ def main(args):
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    if not args.distributed or (global_rank == 0 and args.log_dir is not None and not args.eval):
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = SummaryWriter(log_dir=args.log_dir)
+    if (not args.distributed or (global_rank == 0)) and args.output_dir is not None and not args.eval:
+        os.makedirs(args.output_dir, exist_ok=True)
+        misc.maybe_setup_wandb(args.output_dir, args=args)
+
+        log_writer = SummaryWriter(log_dir=args.output_dir)
     else:
         log_writer = None
 
+    # assert False, (len(dataset_train), len(dataset_val))
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
-        batch_size=args.batch_size,
+        # batch_size=12,
+        batch_size=512,
+        # batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=True,
+        drop_last=False,
     )
 
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, sampler=sampler_val,
-        batch_size=args.batch_size,
+        # batch_size=12,
+        batch_size=512,
+        # batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False
@@ -196,6 +211,7 @@ def main(args):
     model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
         global_pool=args.global_pool,
+        n_last_layers=args.n_last_layers,
     )
 
     if args.finetune and not args.eval:
@@ -227,7 +243,7 @@ def main(args):
     # for linear prob only
     # assert False, model.head
     # hack: revise model's head with BN
-    # model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+    model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
     # model.head = torch.nn.Identity()
     # freeze all but the head
     for _, p in model.named_parameters():
@@ -259,144 +275,131 @@ def main(args):
         model_without_ddp = model.module
 
 
+    optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    print(optimizer)
+    loss_scaler = NativeScaler()
 
-    # optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    # print(optimizer)
-    # loss_scaler = NativeScaler()
-    #
-    # criterion = torch.nn.CrossEntropyLoss()
-    #
-    # print("criterion = %s" % str(criterion))
-    #
-    misc.load_model(args=args, model_without_ddp=model_without_ddp,)#  optimizer=optimizer, loss_scaler=loss_scaler)
+    criterion = torch.nn.CrossEntropyLoss()
 
-    X_train, Y_train = collect_features(model, data_loader_train, device, "train")
-    X_test, Y_test = collect_features(model, data_loader_val, device, "val")
+    print("criterion = %s" % str(criterion))
 
+    misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
-    print(f"{X_train.shape=}, {Y_train.shape=}")
-    print(f"{X_test.shape=}, {Y_test.shape=}")
+    if args.eval:
+        test_stats = evaluate(data_loader_val, model, device)
+        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+        exit(0)
 
     classifier = model.head
-    optim_kwargs = {
-        'line_search_fn': 'strong_wolfe',
-        'max_iter': 5000,
-        'lr': 1.,
-        'tolerance_grad': 1e-10,
-        'tolerance_change': 0,
-    }
 
-    print('collecting features ... done')
 
-    best_acc = 0.
-    best_w = 0.
-    best_classifier = None
-    for w in torch.logspace(-6, 5, steps=45).tolist():
-        optimizer = optim.LBFGS(classifier.parameters(), **optim_kwargs)
 
-        optimizer.step(
-            build_step(X_train, Y_train, classifier, optimizer, w, criterion_fn=criterion_fn))
-        # acc = compute_accuracy(X_val, Y_val, classifier, metric)
 
-        output = classifier(X_test.to(device))
-        acc1, acc5 = accuracy(output, Y_test, topk=(1, 5))
+    print(f"Start training for {args.epochs} epochs")
+    start_time = time.time()
+    max_accuracy = 0.0
+    for epoch in range(args.start_epoch, args.epochs):
 
-        if best_acc < acc1:
-            best_acc = acc1
-            best_w = w
-            best_classifier = deepcopy(classifier)
+        if epoch % args.aug_every == 0:
+            X_train, Y_train = collect_features(
+                model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
+            )
+            ds_train = TensorDataset(X_train, Y_train)
+            dl_train = torch.utils.data.DataLoader(
+                ds_train, sampler=sampler_train,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                pin_memory=args.pin_mem,
+                drop_last=False,
+            )
 
-        print(f'{w=:.4e}, {acc1=:.4f}, {acc5=:.4f}')
-        # logger.log(
-        #     engine=engine_mock, global_step=-1,
-        #     **{
-        #         "w": w,
-        #         f"val_linear/{args.dataset}": acc
-        #     }
-        # )
-        # if wandb.run is not None:
-        #     wandb.log({
-        #         "w": w,
-        #         f"val_linear/{args.dataset}": acc
-        #     })
+            X_test, Y_test = collect_features(
+                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val"
+            )
+            ds_test = TensorDataset(X_test, Y_test)
+            dl_val = torch.utils.data.DataLoader(
+                ds_test, sampler=sampler_val,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers,
+                pin_memory=args.pin_mem,
+                drop_last=False
+            )
 
-    print(f'BEST: w={best_w:.4e}, acc={best_acc:.4f}')
+        if args.distributed:
+            dl_train.sampler.set_epoch(epoch)
+        print(f"{epoch=}")
+        train_stats = train_one_epoch(
+            classifier, criterion, dl_train,
+            optimizer, device, epoch, loss_scaler,
+            max_norm=None,
+            log_writer=log_writer,
+            args=args
+        )
+        # if args.output_dir:
+        #     misc.save_model(
+        #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+        #         loss_scaler=loss_scaler, epoch=epoch)
 
-    # X = torch.cat([X_train, X_val], 0)
-    # Y = torch.cat([Y_train, Y_val], 0)
-    # optimizer = optim.LBFGS(best_classifier.parameters(), **optim_kwargs)
-    # optimizer.step(build_step(X_trainval, Y_trainval, best_classifier, optimizer, best_w, criterion_fn=criterion_fn))
-    # acc = compute_accuracy(X_test, Y_test, best_classifier, metric_name_or_fn=metric)
-    # logger.log_msg(f'test acc={acc:.4f}')
-    # logger.log(
-    #     engine=engine_mock, global_step=-1,
-    #     **{
-    #         f"test_linear/{args.dataset}": acc
-    #     }
-    # )
+        test_stats = evaluate(dl_val, classifier, device)
+        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+        max_accuracy = max(max_accuracy, test_stats["acc1"])
+        print(f'Max accuracy: {max_accuracy:.2f}%')
 
-    #
-    # if args.eval:
-    #     test_stats = evaluate(data_loader_val, model, device)
-    #     print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-    #     exit(0)
-    #
-    # print(f"Start training for {args.epochs} epochs")
-    # start_time = time.time()
-    # max_accuracy = 0.0
-    # for epoch in range(args.start_epoch, args.epochs):
-    #     if args.distributed:
-    #         data_loader_train.sampler.set_epoch(epoch)
-    #     train_stats = train_one_epoch(
-    #         model, criterion, data_loader_train,
-    #         optimizer, device, epoch, loss_scaler,
-    #         max_norm=None,
-    #         log_writer=log_writer,
-    #         args=args
-    #     )
-    #     if args.output_dir:
-    #         misc.save_model(
-    #             args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-    #             loss_scaler=loss_scaler, epoch=epoch)
-    #
-        # test_stats = evaluate(data_loader_val, model, device)
-    #     print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-    #     max_accuracy = max(max_accuracy, test_stats["acc1"])
-    #     print(f'Max accuracy: {max_accuracy:.2f}%')
-    #
-    #     if log_writer is not None:
-    #         log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
-    #         log_writer.add_scalar('perf/test_acc5', test_stats['acc5'], epoch)
-    #         log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
-    #
-    #     log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-    #                     **{f'test_{k}': v for k, v in test_stats.items()},
-    #                     'epoch': epoch,
-    #                     'n_parameters': n_parameters}
-    #
-    #     if args.output_dir and misc.is_main_process():
-    #         if log_writer is not None:
-    #             log_writer.flush()
-    #         with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-    #             f.write(json.dumps(log_stats) + "\n")
-    #
-    # total_time = time.time() - start_time
-    # total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    # print('Training time {}'.format(total_time_str))
+        if log_writer is not None:
+            log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
+            log_writer.add_scalar('perf/test_acc5', test_stats['acc5'], epoch)
+            log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
 
-def collect_features(model: models_vit.VisionTransformer, loader, device, tqdm_desc: str = None):
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()},
+                     'epoch': epoch,
+                     'n_parameters': n_parameters}
+
+        if args.output_dir and misc.is_main_process():
+            if log_writer is not None:
+                log_writer.flush()
+            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+                f.write(json.dumps(log_stats) + "\n")
+
+    total_time = time.time() - start_time
+    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    print('Training time {}'.format(total_time_str))
+    nvidia_smi.nvmlShutdown()
+
+
+def collect_features(model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader, device, shuffle_subsets: int, tqdm_desc: str = None):
     model.eval()
     with torch.no_grad():
         features = []
         labels = []
-
-        for batch_idx, (data, target) in tqdm(enumerate(loader), desc=tqdm_desc):
-            z = model.forward_features(data.to(device))
+        # for (data, target) in tqdm(loader,  desc=tqdm_desc):
+        for (data, target) in tqdm(loader, desc=tqdm_desc):
+            # assert False, data.shape
+            z = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets)
             features.append(z.detach().cpu())
-            labels.append(target)
+            # assert False, target.shape
+            labels.append(target.detach().cpu().short())
 
+            # print(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2, z.shape, z.dtype, target.dtype)
+            ####
+
+
+            handle = nvidia_smi.nvmlDeviceGetHandleByIndex(0)
+            # card id 0 hardcoded here, there is also a call to get all available card ids, so we could iterate
+
+            info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
+            #
+            # print("Total memory:", info.total  / 1024 ** 2 )
+            # print("Free memory:", info.free  / 1024 ** 2)
+            # print("Used memory:", info.used  / 1024 ** 2 )
+
+
+
+            gc.collect()
+    #
+    # assert False
     features = torch.cat(features, dim=0)
-    labels = torch.cat(labels, dim=0)
+    labels = torch.cat(labels, dim=0).long()
     return features, labels
 
 def build_step(X, Y, classifier, optimizer, w, criterion_fn):

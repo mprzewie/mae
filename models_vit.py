@@ -34,7 +34,12 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             del self.norm  # remove the original norm
 
-    def forward_features(self, x):
+        self.n_last_layers = n_last_layers
+        self.head = nn.Linear(
+            self.embed_dim * n_last_layers, self.num_classes
+        )
+
+    def forward_features(self, x, shuffle_subsets: int = 1):
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -43,8 +48,34 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
+        # assert False, x.shape
+        x_cls = x[:, :1]
+        x_pos = x[:, 1:]
+
+        assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
+        x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
+        N, L, D = x_pos.shape
+        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+        ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
+        x_pos_shuffled = torch.gather(x, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
+        x_pos_shuffled = x_pos_shuffled.reshape(N, shuffle_subsets, L // shuffle_subsets, D)
+
+        x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
+            N*shuffle_subsets, (L//shuffle_subsets)+1, D
+        )
+
         for blk in self.blocks:
             x = blk(x)
+            # TODO potentially reshuffle between blocks
+
+        x_n_s_cl_d = x.reshape(N, shuffle_subsets, (L//shuffle_subsets)+1, D)
+        x_cls_agg = x_n_s_cl_d[:, :, :1]
+        x_pos = x_n_s_cl_d[:, :, 1:]
+
+        x_cls_agg = x_cls_agg.mean(dim=1)
+        x_pos = x_pos.reshape(N, L, D)
+
+        x = torch.cat([x_cls_agg, x_pos], dim=1)
 
         if self.global_pool:
             x = x[:, 1:, :].mean(dim=1)  # global pool without cls token
@@ -55,6 +86,10 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
         return outcome
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.forward_features(x)
+        x = self.forward_head(x)
+        return x
 
 class Block(nn.Module):
     def __init__(
