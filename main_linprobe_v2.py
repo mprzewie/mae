@@ -32,7 +32,7 @@ import timm
 import gc
 import nvidia_smi
 
-nvidia_smi.nvmlInit()
+# nvidia_smi.nvmlInit()
 # assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from tqdm import tqdm
@@ -80,12 +80,16 @@ def get_args_parser():
     # * Finetuning params
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
-    parser.add_argument('--global_pool', action='store_true')
+    # parser.add_argument('--global_pool', action='store_true')
     parser.set_defaults(global_pool=False)
-    parser.add_argument('--cls_token', action='store_false', dest='global_pool',
-                        help='Use class token instead of global pool for classification')
+    # parser.add_argument('--cls_token', action='store_false', dest='global_pool',
+    #                     help='Use class token instead of global pool for classification')
     parser.add_argument("--n_last_layers", type=int, default=1, help="Use activations from N last layers for classification")
     parser.add_argument("--shuffle_subsets", type=int, default=1, help="Shuffle positional tokens into N subsets during inference")
+    parser.add_argument("--agg_method", choices=["rep", "log", "t1"], default="rep", help="representations / logits / take 1 of shuffled")
+    parser.add_argument("--cls_features", choices=["cls", "pos", "both"], default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--block_reshuffling", "--br", action="store_true", help="reshuffle pos tokens btw. blocks")
+
     # Dataset parameters
     parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
                         help='dataset path')
@@ -210,15 +214,26 @@ def main(args):
 
     model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
-        global_pool=args.global_pool,
+        global_pool=False, #args.global_pool,
         n_last_layers=args.n_last_layers,
+        block_reshuffling=args.block_reshuffling
     )
+    classifier = AggHead(model.head, agg_method=args.agg_method)
 
     if args.finetune and not args.eval:
-        checkpoint = torch.load(args.finetune, map_location='cpu')
+        if Path(args.finetune).exists():
+            print("Interpreting", args.finetune, "as path")
+            checkpoint_model = torch.load(args.finetune, map_location='cpu')["model"]
+        else:
+            print("Interpreting", args.finetune, "as timm model")
+            from timm.models.vision_transformer import _create_vision_transformer
+            model_args = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12)
+
+            checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_args).state_dict()
+
 
         print("Load pre-trained checkpoint from: %s" % args.finetune)
-        checkpoint_model = checkpoint['model']
+        # checkpoint_model = checkpoint['model']
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
@@ -232,26 +247,28 @@ def main(args):
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
 
-        if args.global_pool:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        else:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+        # if args.global_pool:
+        #     assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
+        # else:
+        assert not any([k.startswith("blocks") for k in msg.missing_keys])
+        # assert set(msg.missing_keys) == {'head.weight', 'head.bias'}, msg.missing_keys
 
         # manually initialize fc layer: following MoCo v3
-        trunc_normal_(model.head.weight, std=0.01)
+        trunc_normal_(classifier.mlp.weight, std=0.01)
 
     # for linear prob only
     # assert False, model.head
     # hack: revise model's head with BN
-    model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+    # model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
     # model.head = torch.nn.Identity()
     # freeze all but the head
-    for _, p in model.named_parameters():
-        p.requires_grad = False
-    for _, p in model.head.named_parameters():
+    # for _, p in model.named_parameters():
+    #     p.requires_grad = False
+    for _, p in classifier.named_parameters():
         p.requires_grad = True
 
     model.to(device)
+    classifier.to(device)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -275,7 +292,7 @@ def main(args):
         model_without_ddp = model.module
 
 
-    optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = LARS(classifier.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     print(optimizer)
     loss_scaler = NativeScaler()
 
@@ -290,7 +307,7 @@ def main(args):
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)
 
-    classifier = model.head
+    # classifier = model.head
 
 
 
@@ -303,10 +320,11 @@ def main(args):
         if epoch % args.aug_every == 0:
             X_train, Y_train = collect_features(
                 model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
+                return_features=args.cls_features
             )
             ds_train = TensorDataset(X_train, Y_train)
             dl_train = torch.utils.data.DataLoader(
-                ds_train, sampler=sampler_train,
+                ds_train, shuffle=True,
                 batch_size=args.batch_size,
                 num_workers=args.num_workers,
                 pin_memory=args.pin_mem,
@@ -314,11 +332,12 @@ def main(args):
             )
 
             X_test, Y_test = collect_features(
-                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val"
+                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
+                return_features=args.cls_features
             )
             ds_test = TensorDataset(X_test, Y_test)
             dl_val = torch.utils.data.DataLoader(
-                ds_test, sampler=sampler_val,
+                ds_test, shuffle=False,
                 batch_size=args.batch_size,
                 num_workers=args.num_workers,
                 pin_memory=args.pin_mem,
@@ -364,10 +383,14 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-    nvidia_smi.nvmlShutdown()
+    # nvidia_smi.nvmlShutdown()
 
 
-def collect_features(model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader, device, shuffle_subsets: int, tqdm_desc: str = None):
+def collect_features(
+        model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
+        device, shuffle_subsets: int, return_features: str, tqdm_desc: str = None,
+        # shuffle_agg: str = "cls_mean"
+):
     model.eval()
     with torch.no_grad():
         features = []
@@ -375,19 +398,24 @@ def collect_features(model: models_vit.VisionTransformer, loader: torch.utils.da
         # for (data, target) in tqdm(loader,  desc=tqdm_desc):
         for (data, target) in tqdm(loader, desc=tqdm_desc):
             # assert False, data.shape
-            z = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets)
+            z = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
+            
+            # hack
+            z = z.mean(dim=1).unsqueeze(1)
+            
+
             features.append(z.detach().cpu())
             # assert False, target.shape
             labels.append(target.detach().cpu().short())
-
+            # break
             # print(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2, z.shape, z.dtype, target.dtype)
             ####
 
 
-            handle = nvidia_smi.nvmlDeviceGetHandleByIndex(0)
+            # handle = nvidia_smi.nvmlDeviceGetHandleByIndex(0)
             # card id 0 hardcoded here, there is also a call to get all available card ids, so we could iterate
 
-            info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
+            # info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
             #
             # print("Total memory:", info.total  / 1024 ** 2 )
             # print("Free memory:", info.free  / 1024 ** 2)
@@ -401,6 +429,41 @@ def collect_features(model: models_vit.VisionTransformer, loader: torch.utils.da
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
     return features, labels
+
+class AggHead(nn.Module):
+    def __init__(self, mlp: nn.Linear, agg_method: str):
+        super().__init__()
+        self.bn = torch.nn.BatchNorm1d(mlp.in_features, affine=False, eps=1e-6)
+        self.mlp = mlp
+        self.agg_method = agg_method
+
+    def forward(self, X):
+        B, S, D = X.shape
+
+        # print(X.shape)
+        if self.agg_method == "rep":
+            X = X.mean(dim = 1)
+            Z = self.mlp(self.bn(X))
+            return Z
+
+        elif self.agg_method == "log":
+            X = X.reshape(B*S, D)
+            # assert False, X.shape
+            Z = self.mlp(self.bn(X))
+            # assert False, Z.shape
+            Z = Z.reshape(B, S, Z.shape[-1])
+            Z = Z.mean(dim=1)
+            # assert False, Z.shape
+            return Z
+
+        if self.agg_method == "t1":
+            X = X[:, 0]  # take the first of the shuffled representations
+            Z = self.mlp(self.bn(X))
+            return Z
+
+        raise NotImplementedError(self.agg_method)
+
+
 
 def build_step(X, Y, classifier, optimizer, w, criterion_fn):
     def step():

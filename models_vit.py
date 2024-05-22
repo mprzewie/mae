@@ -23,7 +23,7 @@ import torch.nn.functional as F
 class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
     """ Vision Transformer with support for global average pooling
     """
-    def __init__(self, n_last_layers: int = 1, global_pool=False, **kwargs):
+    def __init__(self, n_last_layers: int = 1, block_reshuffling: bool = False, global_pool=False, **kwargs):
         super(VisionTransformer, self).__init__(**kwargs)
 
         self.global_pool = global_pool
@@ -38,8 +38,9 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         self.head = nn.Linear(
             self.embed_dim * n_last_layers, self.num_classes
         )
+        self.block_reshuffling = block_reshuffling
 
-    def forward_features(self, x, shuffle_subsets: int = 1):
+    def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls"):
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -54,39 +55,67 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
         assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
         x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
-        N, L, D = x_pos.shape
-        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
-        ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
-        x_pos_shuffled = torch.gather(x, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
-        x_pos_shuffled = x_pos_shuffled.reshape(N, shuffle_subsets, L // shuffle_subsets, D)
+        B, L, D = x_pos.shape
+
+        noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
+        ids_shuffle = torch.argsort(noise, dim=1)
+        x_pos_shuffled = torch.gather(x_pos, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
+        x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
 
         x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
-            N*shuffle_subsets, (L//shuffle_subsets)+1, D
+            B*shuffle_subsets, (L//shuffle_subsets)+1, D
         )
 
         for blk in self.blocks:
             x = blk(x)
-            # TODO potentially reshuffle between blocks
 
-        x_n_s_cl_d = x.reshape(N, shuffle_subsets, (L//shuffle_subsets)+1, D)
-        x_cls_agg = x_n_s_cl_d[:, :, :1]
-        x_pos = x_n_s_cl_d[:, :, 1:]
+            if self.block_reshuffling:
+                x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L // shuffle_subsets) + 1, D)
+                x_cls = x_n_s_cl_d[:, :, :1]
+                x_pos = x_n_s_cl_d[:, :, 1:].reshape(B, L, D)
+                noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
+                ids_shuffle = torch.argsort(noise, dim=1)
+                x_pos_shuffled = torch.gather(x_pos, dim=1, index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
+                x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
+                x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
+                    B * shuffle_subsets, (L // shuffle_subsets) + 1, D
+                )
+                # TODO potentially reshuffle between blocks
+        
+        x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L//shuffle_subsets)+1, D)
+        x_cls = x_n_s_cl_d[:, :, 0]
+        x_pos = x_n_s_cl_d[:, :, 1:].mean(dim=2)
 
-        x_cls_agg = x_cls_agg.mean(dim=1)
-        x_pos = x_pos.reshape(N, L, D)
+        if return_features == "cls":
+            return x_cls
+        elif return_features == "pos":
+            return x_pos
+        elif return_features == "both":
+            return torch.concat([x_cls, x_pos], dim=2)
 
-        x = torch.cat([x_cls_agg, x_pos], dim=1)
+        return x_cls, x_pos
+        # assert False, (x_cls_agg.shape, x_pos.shape)
 
-        if self.global_pool:
-            x = x[:, 1:, :].mean(dim=1)  # global pool without cls token
-            outcome = self.fc_norm(x)
-        else:
-            x = self.norm(x)
-            outcome = x[:, 0]
+        # if agg == "representation_mean":
+        #     x_cls_agg = x_cls_agg.mean(dim=1)
+        #     x_pos = x_pos.reshape(N, L, D)
+        #     x = torch.cat([x_cls_agg, x_pos], dim=1)
+        #     if self.global_pool:
+        #         x = x[:, 1:, :].mean(dim=1)  # global pool without cls token
+        #         outcome = self.fc_norm(x)
+        #     else:
+        #         x = self.norm(x)
+        #         outcome = x[:, 0]
+        #
+        # elif agg == "logit_mean":
+        #     assert not self.global_pool
+        #     outcome = x_cls.squeeze()
+        #
+        # return outcome
 
-        return outcome
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError()
         x = self.forward_features(x)
         x = self.forward_head(x)
         return x
