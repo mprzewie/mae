@@ -185,7 +185,7 @@ def main(args):
 
     if (not args.distributed or (global_rank == 0)) and args.output_dir is not None and not args.eval:
         os.makedirs(args.output_dir, exist_ok=True)
-        misc.maybe_setup_wandb(args.output_dir, args=args)
+        misc.maybe_setup_wandb(args.output_dir, args=args, job_type="linprobe")
 
         log_writer = SummaryWriter(log_dir=args.output_dir)
     else:

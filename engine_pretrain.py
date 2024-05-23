@@ -15,6 +15,8 @@ from math import ceil
 import torch
 import warnings
 
+from torch.utils.tensorboard import SummaryWriter
+
 import util.misc as misc
 import util.lr_sched as lr_sched
 
@@ -26,7 +28,7 @@ from loss_func import uniformity_loss
 def train_one_epoch(model: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,
-                    log_writer=None,
+                    log_writer: SummaryWriter=None,
                     args=None):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")

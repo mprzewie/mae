@@ -159,6 +159,7 @@ def main(args):
 
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
+        misc.maybe_setup_wandb(args.log_dir, args=args, job_type="pretrain")
         log_writer = SummaryWriter(log_dir=args.log_dir)
     else:
         log_writer = None
