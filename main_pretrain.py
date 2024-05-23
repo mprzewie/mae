@@ -103,7 +103,7 @@ def get_args_parser():
 
     # new
     parser.add_argument('--lamb', type=float, default=0)
-    parser.add_argument('--umae-reg', type=str, default='none', choices=['none', 'spectral'])
+    parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
     parser.add_argument('--val-interval', default=10, type=int)
 
     return parser
