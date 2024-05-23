@@ -80,8 +80,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
                 x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
                     B * shuffle_subsets, (L // shuffle_subsets) + 1, D
                 )
-                # TODO potentially reshuffle between blocks
-        
+
         x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L//shuffle_subsets)+1, D)
         x_cls = x_n_s_cl_d[:, :, 0]
         x_pos = x_n_s_cl_d[:, :, 1:].mean(dim=2)
@@ -94,24 +93,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             return torch.concat([x_cls, x_pos], dim=2)
 
         return x_cls, x_pos
-        # assert False, (x_cls_agg.shape, x_pos.shape)
 
-        # if agg == "representation_mean":
-        #     x_cls_agg = x_cls_agg.mean(dim=1)
-        #     x_pos = x_pos.reshape(N, L, D)
-        #     x = torch.cat([x_cls_agg, x_pos], dim=1)
-        #     if self.global_pool:
-        #         x = x[:, 1:, :].mean(dim=1)  # global pool without cls token
-        #         outcome = self.fc_norm(x)
-        #     else:
-        #         x = self.norm(x)
-        #         outcome = x[:, 0]
-        #
-        # elif agg == "logit_mean":
-        #     assert not self.global_pool
-        #     outcome = x_cls.squeeze()
-        #
-        # return outcome
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
