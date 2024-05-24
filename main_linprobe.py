@@ -25,8 +25,8 @@ import torchvision.datasets as datasets
 
 import timm
 
-assert timm.__version__ == "0.3.2" # version check
-from timm.models.layers import trunc_normal_
+# assert timm.__version__ == "0.3.2" # version check
+# from timm.models.layers import trunc_normal_
 
 import util.misc as misc
 from util.pos_embed import interpolate_pos_embed
@@ -165,6 +165,7 @@ def main(args):
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
     if global_rank == 0 and args.log_dir is not None and not args.eval:
+        misc.maybe_setup_wandb(args.log_dir, args=args, job_type="linprobe")
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir=args.log_dir)
     else:
@@ -215,7 +216,7 @@ def main(args):
             assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
 
         # manually initialize fc layer: following MoCo v3
-        trunc_normal_(model.head.weight, std=0.01)
+        # trunc_normal_(model.head.weight, std=0.01)
 
     # for linear prob only
     # hack: revise model's head with BN
