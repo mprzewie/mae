@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 
 import timm.models.vision_transformer
-from timm.layers import Mlp, DropPath
+from timm.layers import DropPath
 import torch.nn.functional as F
 
 
@@ -116,7 +116,7 @@ class Block(nn.Module):
             drop_path: float = 0.,
             act_layer: nn.Module = nn.GELU,
             norm_layer: nn.Module = nn.LayerNorm,
-            mlp_layer: nn.Module = Mlp,
+            mlp_layer: nn.Module = timm.models.vision_transformer.Mlp,
     ) -> None:
         super().__init__()
         self.norm1 = norm_layer(dim)
@@ -129,7 +129,7 @@ class Block(nn.Module):
             proj_drop=proj_drop,
             norm_layer=norm_layer,
         )
-        self.ls1 = timm.LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        self.ls1 = nn.Identity()
         self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
         self.norm2 = norm_layer(dim)
@@ -139,7 +139,7 @@ class Block(nn.Module):
             act_layer=act_layer,
             drop=proj_drop,
         )
-        self.ls2 = timm.LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        self.ls2 = nn.Identity()
         self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
     def forward(self, x: torch.Tensor, return_attention=False) -> torch.Tensor:
