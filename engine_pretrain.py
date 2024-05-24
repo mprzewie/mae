@@ -53,20 +53,23 @@ def train_one_epoch(model: torch.nn.Module,
         targets = targets.to(device, non_blocking=True)
 
         with torch.cuda.amp.autocast():
-            loss_mae, _, _, (cls_feats, outputs, _, _) = model(samples, mask_ratio=args.mask_ratio)
+            loss_mae, _, _, (cls_feats, outputs, cls_feats, outputs, latent, ids_restore, latent_pred) = model(samples, mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
                 loss_reg = torch.zeros_like(loss_mae)
             else:
                 loss_reg = uniformity_loss(cls_feats)
 
+            loss_latent = (latent_pred - latent[:, 1:].detach()).pow(2).mean()
+
             loss_ce = torch.nn.functional.cross_entropy(outputs, targets)
 
-        loss = loss_mae + args.lamb * loss_reg + loss_ce
+        loss = loss_mae + (args.lamb * loss_reg) + (args.lpred_lambda * loss_latent) + loss_ce
 
         loss_mae_value = loss_mae.item()
         loss_reg_value = loss_reg.item()
         loss_ce_value = loss_ce.item()
+        loss_latent_value = loss_latent.item()
         loss_value = loss.item()
         train_acc = (outputs.argmax(dim=1) == targets).float().mean()
 
@@ -78,11 +81,14 @@ def train_one_epoch(model: torch.nn.Module,
 
         torch.cuda.synchronize()
 
-        metric_logger.update(loss=loss_value)
-        metric_logger.update(loss_mae=loss_mae_value)
-        metric_logger.update(loss_reg=loss_reg_value)
-        metric_logger.update(loss_ce=loss_ce_value)
-        metric_logger.update(train_acc=train_acc)
+        metric_logger.update(
+            loss=loss_value,
+            loss_mae=loss_mae_value,
+            loss_reg=loss_reg_value,
+            loss_ce=loss_ce_value,
+            loss_latent=loss_latent_value,
+            train_acc=train_acc
+        )
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
@@ -91,6 +97,7 @@ def train_one_epoch(model: torch.nn.Module,
         loss_mae_value_reduce = misc.all_reduce_mean(loss_mae_value)
         loss_reg_value_reduce = misc.all_reduce_mean(loss_reg_value)
         loss_ce_value_reduce = misc.all_reduce_mean(loss_ce_value)
+        loss_latent_value_reduce = misc.all_reduce_mean(loss_latent_value)
         train_acc_reduce = misc.all_reduce_mean(train_acc)
 
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
@@ -102,8 +109,8 @@ def train_one_epoch(model: torch.nn.Module,
             log_writer.add_scalar('train_loss_mae', loss_mae_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_loss_reg', loss_reg_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_loss_ce', loss_ce_value_reduce, epoch_1000x)
+            log_writer.add_scalar('train_loss_latent', loss_latent_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_acc', train_acc_reduce, epoch_1000x)
-
             log_writer.add_scalar('lr', lr, epoch_1000x)
 
 
