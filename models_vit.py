@@ -16,7 +16,6 @@ import torch
 import torch.nn as nn
 
 import timm.models.vision_transformer
-from timm.layers import DropPath
 import torch.nn.functional as F
 
 
@@ -130,7 +129,7 @@ class Block(nn.Module):
             norm_layer=norm_layer,
         )
         self.ls1 = nn.Identity()
-        self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.drop_path1 = nn.Identity()
 
         self.norm2 = norm_layer(dim)
         self.mlp = mlp_layer(
@@ -140,7 +139,7 @@ class Block(nn.Module):
             drop=proj_drop,
         )
         self.ls2 = nn.Identity()
-        self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.drop_path2 = nn.Identity()
 
     def forward(self, x: torch.Tensor, return_attention=False) -> torch.Tensor:
         y, attention = self.attn(self.norm1(x))
