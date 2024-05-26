@@ -106,6 +106,7 @@ def get_args_parser():
     parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
     parser.add_argument('--val_interval', default=10, type=int)
     parser.add_argument('--save_interval', default=50, type=int)
+    parser.add_argument("--amp", default="float16", choices=["float16", "float32", "none"], type=str)
 
     return parser
 

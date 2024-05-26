@@ -52,7 +52,10 @@ def train_one_epoch(model: torch.nn.Module,
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        with torch.cuda.amp.autocast():
+        with torch.cuda.amp.autocast(
+            enabled=args.amp != "none",
+            dtype=torch.float16 if args.amp == "float16" else torch.float32
+        ):
             loss_mae, _, _, (cls_feats, outputs, _, _) = model(samples, mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
