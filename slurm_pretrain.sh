@@ -2,9 +2,6 @@
 #SBATCH --mem-per-cpu=7G
 #SBATCH --cpus-per-task=64
 #SBATCH --ntasks-per-node=1
-#SBATCH -p plgrid-gpu-a100 
-#SBATCH -A plgccontrastive-gpu-a100
-#SBATCH --time=48:00:00 
 
 
 set -ex
