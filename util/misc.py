@@ -298,7 +298,7 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
     return total_norm
 
 
-def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
+def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, test_stats):
     output_dir = Path(args.output_dir)
     epoch_name = str(epoch)
     if loss_scaler is not None:
@@ -310,6 +310,7 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
                 'epoch': epoch,
                 'scaler': loss_scaler.state_dict(),
                 'args': args,
+                'test_stats': test_stats
             }
 
             save_on_master(to_save, checkpoint_path)
@@ -333,7 +334,12 @@ def load_model(args, model_without_ddp, optimizer=None, loss_scaler=None):
                 args.start_epoch = checkpoint['epoch'] + 1
                 if 'scaler' in checkpoint:
                     loss_scaler.load_state_dict(checkpoint['scaler'])
+
+                test_stats = checkpoint['test_stats']
                 print("With optim & sched!")
+                print("Test stats", test_stats)
+                return test_stats
+
 
 
 def all_reduce_mean(x):
