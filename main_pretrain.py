@@ -31,7 +31,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_mae
 
-from engine_pretrain import train_one_epoch
+from engine_pretrain import train_one_epoch, AMP_PRECISIONS
 from engine_finetune import evaluate
 
 
@@ -106,7 +106,7 @@ def get_args_parser():
     parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
     parser.add_argument('--val_interval', default=10, type=int)
     parser.add_argument('--save_interval', default=50, type=int)
-    parser.add_argument("--amp", default="float16", choices=["float16", "float32", "none"], type=str)
+    parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
 
     return parser
 

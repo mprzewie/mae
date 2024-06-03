@@ -24,6 +24,13 @@ import torch.distributed as dist
 
 from loss_func import uniformity_loss
 
+AMP_PRECISIONS = {
+    "float16": torch.float16,
+    "float32": torch.float32,
+    "bfloat16": torch.bfloat16,
+    "none": torch.float32,
+}
+
 
 def train_one_epoch(model: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -54,7 +61,7 @@ def train_one_epoch(model: torch.nn.Module,
 
         with torch.cuda.amp.autocast(
             enabled=args.amp != "none",
-            dtype=torch.float16 if args.amp == "float16" else torch.float32
+            dtype=AMP_PRECISIONS[args.amp]
         ):
             loss_mae, _, _, (cls_feats, outputs, _, _) = model(samples, mask_ratio=args.mask_ratio)
 
