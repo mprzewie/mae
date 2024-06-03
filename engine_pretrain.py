@@ -52,7 +52,10 @@ def train_one_epoch(model: torch.nn.Module,
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        with torch.cuda.amp.autocast():
+        with torch.cuda.amp.autocast(
+            enabled=args.amp != "none",
+            dtype=torch.float16 if args.amp == "float16" else torch.float32
+        ):
             loss_mae, _, _, (cls_feats, outputs, cls_feats, outputs, latent, ids_restore, latent_pred) = model(samples, mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
@@ -100,6 +103,15 @@ def train_one_epoch(model: torch.nn.Module,
         loss_latent_value_reduce = misc.all_reduce_mean(loss_latent_value)
         train_acc_reduce = misc.all_reduce_mean(train_acc)
 
+        losses = {
+            "value": loss_value_reduce,
+            "mae": loss_mae_value_reduce,
+            "reg": loss_reg_value_reduce,
+            "ce": loss_ce_value_reduce,
+        }
+        assert not any([math.isnan(l) for l in losses.values()]), losses
+
+
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
@@ -112,6 +124,7 @@ def train_one_epoch(model: torch.nn.Module,
             log_writer.add_scalar('train_loss_latent', loss_latent_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_acc', train_acc_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
+            log_writer.add_scalar("epoch", epoch, epoch_1000x)
 
 
     # gather the stats from all processes
