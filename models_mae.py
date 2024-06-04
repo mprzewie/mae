@@ -253,7 +253,7 @@ class MaskedAutoencoderViT(nn.Module):
         B, T, E = x.shape
 
         mask_tokens = self.l_mask_token.repeat(B, FT, 1)
-        mask_tokens = mask_tokens + self.pos_embed[:, 1:, :]
+        mask_tokens = mask_tokens + self.decoder_pos_embed
         ids_shuffle = torch.argsort(ids_restore, dim=1)
         ids_keep = ids_shuffle[:, :T]
         mask_tokens_gathered = torch.gather(mask_tokens, dim=1, index=ids_keep)
