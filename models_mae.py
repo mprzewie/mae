@@ -249,16 +249,30 @@ class MaskedAutoencoderViT(nn.Module):
         return x
 
     def forward_l_decoder(self, x, ids_restore):
+        x_init = x
+        B, T, D = x.shape
         B, FT = ids_restore.shape
-        B, T, E = x.shape
+
+        x = self.l_decoder_embed(x)
+        
+        
+        # print("x", x.shape, "ids_restore",ids_restore.shape)
 
         mask_tokens = self.l_mask_token.repeat(B, FT, 1)
-        ids_shuffle = torch.argsort(ids_restore, dim=1)
-        mask_tokens_gathered = torch.gather(mask_tokens, dim=1, index=ids_shuffle)
+        
+        
+        # print("mask_tokens", mask_tokens.shape)
+        
+        
+        # assert False, ("x", x.shape, "ids_restore",ids_restore.shape, "mask_tokens", mask_tokens.shape)
+        # mask_tokens_gathered = torch.gather(mask_tokens, dim=1, index=ids_shuffle)
         cls_features = x[:, :1]
-        x = torch.cat([cls_features, mask_tokens_gathered], dim=1)
+        x = torch.cat([cls_features, mask_tokens], dim=1)
         # use only the cls token form the input x
         x = x + self.decoder_pos_embed
+        
+        # print("x after pos embedding",x.shape)
+
 
         for blk in self.l_decoder_blocks:
             x = blk(x)
@@ -266,11 +280,28 @@ class MaskedAutoencoderViT(nn.Module):
 
         # predictor projection
         x = self.l_decoder_pred(x)
+        
+        # print("x after transformer",x.shape)
+
 
         # remove cls token
         x = x[:, 1:, :]
-        x = x[:, :T, :]
+        
+        # print("x w/o cls token",x.shape)
 
+
+        ids_shuffle = torch.argsort(ids_restore, dim=1)
+        ids_keep = ids_shuffle[:, :(T-1)]
+        
+
+        x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+        
+        
+        # print("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x final", x.shape)
+        
+        # assert False, ("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x init", x_init.shape, "x final", x.shape)
+        
+        assert x.shape == (B, T-1, D)
         return x
 
 

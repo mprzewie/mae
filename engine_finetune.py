@@ -116,7 +116,7 @@ def evaluate(data_loader, model, device):
         with torch.cuda.amp.autocast():
             output = model(images)
             if type(output) is tuple:
-                _, _, _, (_, output, _, _) = output
+                _, _, _, (_, output, _, _, _) = output
 
             loss = criterion(output, target)
 

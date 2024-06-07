@@ -63,7 +63,7 @@ def train_one_epoch(model: torch.nn.Module,
             enabled=args.amp != "none",
             dtype=AMP_PRECISIONS[args.amp]
         ):
-            loss_mae, _, _, (cls_feats, outputs, cls_feats, outputs, latent, ids_restore, latent_pred) = model(samples, mask_ratio=args.mask_ratio)
+            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model(samples, mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
                 loss_reg = torch.zeros_like(loss_mae)
