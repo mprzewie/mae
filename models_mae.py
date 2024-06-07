@@ -253,12 +253,12 @@ class MaskedAutoencoderViT(nn.Module):
         B, T, E = x.shape
 
         mask_tokens = self.l_mask_token.repeat(B, FT, 1)
-        mask_tokens = mask_tokens + self.decoder_pos_embed
         ids_shuffle = torch.argsort(ids_restore, dim=1)
-        ids_keep = ids_shuffle[:, :T]
-        mask_tokens_gathered = torch.gather(mask_tokens, dim=1, index=ids_keep)
-        x = torch.cat([x[:, :1], mask_tokens_gathered], dim=1)
+        mask_tokens_gathered = torch.gather(mask_tokens, dim=1, index=ids_shuffle)
+        cls_features = x[:, :1]
+        x = torch.cat([cls_features, mask_tokens_gathered], dim=1)
         # use only the cls token form the input x
+        x = x + self.decoder_pos_embed
 
         for blk in self.l_decoder_blocks:
             x = blk(x)
@@ -269,6 +269,8 @@ class MaskedAutoencoderViT(nn.Module):
 
         # remove cls token
         x = x[:, 1:, :]
+        x = x[:, :T, :]
+
         return x
 
 
