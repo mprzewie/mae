@@ -20,13 +20,22 @@ if [ -n "$RESUME_EPOCH" ]; then
   RESUME="--resume $OUT/checkpoint-${RESUME_EPOCH}.pth"
 fi
 
+BASE_PORT=29500
+INCREMENT=1
+port=$BASE_PORT
+isfree=$(netstat -taln | grep $port)
+while [[ -n "$isfree" ]]; do
+    port=$[port+INCREMENT]
+    isfree=$(netstat -taln | grep $port)
+done
+echo "Usable Port: $port"
 
 for N in `seq 0 $(($SLURM_NNODES-1))`;
 do
     srun -N1 --nodelist=${HOSTS[N]} --cpus-per-task $SLURM_CPUS_PER_TASK --mem-per-cpu=6G \
 	  conda run --no-capture-output  -n pt2 \
-	    torchrun --nproc_per_node $N_GPUS --nnodes $SLURM_NNODES --node_rank $N --master-addr $MASTER_IP  \
-	      main_pretrain.py --batch_size $BS --model "mae_${MODEL}" --norm_pix_loss --mask_ratio 0.75 --epochs $EPOCHS --warmup_epochs 40 --blr 1.5e-4 --weight_decay 0.05 --num_workers 32 --data_path $DATA_PATH --lamb 0.01 --umae_reg $REG --lpred_lambda $LPRED_LAMBDA --norm_pix_loss $RESUME --output_dir $OUT --log_dir $OUT --amp $AMP &
+	    torchrun --nproc_per_node $N_GPUS --nnodes $SLURM_NNODES --node_rank $N --master-addr $MASTER_IP --master-port $port  \
+	      main_pretrain.py --batch_size $BS --model "mae_${MODEL}" --norm_pix_loss --mask_ratio 0.75 --epochs $EPOCHS --warmup_epochs 40 --blr 1.5e-4 --weight_decay 0.05 --num_workers 32 --data_path $DATA_PATH --lamb 0.01 --lpred_decoder_depth $LPRED_DECODER_DEPTH --lpred_decoder_heads $LPRED_DECODER_HEADS --umae_reg $REG --lpred_lambda $LPRED_LAMBDA $LPRED_DETACH --norm_pix_loss $RESUME --output_dir $OUT --log_dir $OUT --amp $AMP &
 
 done
 
