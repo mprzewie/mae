@@ -29,6 +29,8 @@ class MaskedAutoencoderViT(nn.Module):
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False,
                  global_pool=False, num_classes=1000,
+                 *,
+                 latent_decoder_depth: int = 8, latent_decoder_heads: int = 12
         ):
         super().__init__()
 
@@ -70,10 +72,9 @@ class MaskedAutoencoderViT(nn.Module):
         self.l_decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         self.l_mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         self.l_decoder_blocks = nn.ModuleList([
-            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True,
-                  # qk_scale=None,
+            Block(decoder_embed_dim, latent_decoder_heads, mlp_ratio, qkv_bias=True,
                   norm_layer=norm_layer)
-            for i in range(decoder_depth)])
+            for i in range(latent_decoder_depth)])
 
         self.l_decoder_norm = norm_layer(decoder_embed_dim)
         self.l_decoder_pred = nn.Linear(decoder_embed_dim, embed_dim, bias=True)  # decoder to patch
