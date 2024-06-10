@@ -67,7 +67,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)  # decoder to patch
         # --------------------------------------------------------------------------
 
-        self.l_decoder_embed =  nn.Linear(embed_dim, decoder_embed_dim, bias=True)
+        self.l_decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         self.l_mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         self.l_decoder_blocks = nn.ModuleList([
             Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True,
@@ -77,7 +77,6 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.l_decoder_norm = norm_layer(decoder_embed_dim)
         self.l_decoder_pred = nn.Linear(decoder_embed_dim, embed_dim, bias=True)  # decoder to patch
-
 
         # --------------------------------------------------------------------------
 
@@ -178,7 +177,6 @@ class MaskedAutoencoderViT(nn.Module):
             assert torch.equal(noise.sort(dim=1)[0][:, :len_keep], torch.zeros(N, len_keep).to(noise.device))
             assert torch.equal(noise.sort(dim=1)[0][:, len_keep:], torch.ones(N, L - len_keep).to(noise.device))
 
-
         # sort noise for each sample
         ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
         # shuffle: sort tokens according to noise - keep first N tokens
@@ -255,23 +253,13 @@ class MaskedAutoencoderViT(nn.Module):
 
         x = self.l_decoder_embed(x)
         
-        
-        # print("x", x.shape, "ids_restore",ids_restore.shape)
 
         mask_tokens = self.l_mask_token.repeat(B, FT, 1)
-        
-        
-        # print("mask_tokens", mask_tokens.shape)
-        
-        
-        # assert False, ("x", x.shape, "ids_restore",ids_restore.shape, "mask_tokens", mask_tokens.shape)
-        # mask_tokens_gathered = torch.gather(mask_tokens, dim=1, index=ids_shuffle)
+
         cls_features = x[:, :1]
         x = torch.cat([cls_features, mask_tokens], dim=1)
         # use only the cls token form the input x
         x = x + self.decoder_pos_embed
-        
-        # print("x after pos embedding",x.shape)
 
 
         for blk in self.l_decoder_blocks:
@@ -280,30 +268,25 @@ class MaskedAutoencoderViT(nn.Module):
 
         # predictor projection
         x = self.l_decoder_pred(x)
-        
-        # print("x after transformer",x.shape)
 
+        # print("x after transformer",x.shape)
 
         # remove cls token
         x = x[:, 1:, :]
-        
+
         # print("x w/o cls token",x.shape)
 
-
         ids_shuffle = torch.argsort(ids_restore, dim=1)
-        ids_keep = ids_shuffle[:, :(T-1)]
-        
+        ids_keep = ids_shuffle[:, :(T - 1)]
 
         x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
-        
-        
-        # print("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x final", x.shape)
-        
-        # assert False, ("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x init", x_init.shape, "x final", x.shape)
-        
-        assert x.shape == (B, T-1, D)
-        return x
 
+        # print("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x final", x.shape)
+
+        # assert False, ("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x init", x_init.shape, "x final", x.shape)
+
+        assert x.shape == (B, T - 1, D)
+        return x
 
     def forward_loss(self, imgs, pred, mask):
         """

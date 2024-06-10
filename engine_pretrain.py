@@ -70,7 +70,11 @@ def train_one_epoch(model: torch.nn.Module,
             else:
                 loss_reg = uniformity_loss(cls_feats)
 
-            loss_latent = (latent_pred - latent[:, 1:].detach()).pow(2).mean()
+            target_latent = latent[:, 1:]
+            if args.lpred_detach:
+                target_latent = target_latent.detach()
+
+            loss_latent = (latent_pred - target_latent).pow(2).mean()
 
             loss_ce = torch.nn.functional.cross_entropy(outputs, targets)
 
