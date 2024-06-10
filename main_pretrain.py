@@ -105,7 +105,7 @@ def get_args_parser():
     parser.add_argument('--lamb', type=float, default=0)
     parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
     parser.add_argument("--lpred_lambda", type=float, default=0., help="weight of loss of latent prediction from cls token")
-    parser.add_argument("--lpred_detach", "-lldt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
+    parser.add_argument("--lpred_no_detach", "-llndt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
 
 
     parser.add_argument('--val_interval', default=10, type=int)
