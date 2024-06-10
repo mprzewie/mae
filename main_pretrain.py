@@ -107,7 +107,7 @@ def get_args_parser():
     parser.add_argument("--lpred_lambda", type=float, default=0., help="weight of loss of latent prediction from cls token")
     parser.add_argument("--lpred_no_detach", "-llndt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
-    parser.add_argument("--lpred_decoder_heads", type=int, default=12)
+    parser.add_argument("--lpred_decoder_heads", type=int, default=16)
 
     parser.add_argument('--val_interval', default=10, type=int)
     parser.add_argument('--save_interval', default=50, type=int)
