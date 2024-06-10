@@ -30,7 +30,7 @@ class MaskedAutoencoderViT(nn.Module):
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False,
                  global_pool=False, num_classes=1000,
                  *,
-                 latent_decoder_depth: int = 8, latent_decoder_heads: int = 12
+                 latent_decoder_depth: int = 8, latent_decoder_heads: int = 16
         ):
         super().__init__()
 
