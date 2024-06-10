@@ -203,7 +203,7 @@ def main(args):
     model = models_mae.__dict__[args.model](
         norm_pix_loss=args.norm_pix_loss,
         latent_decoder_depth=args.lpred_decoder_depth,
-        latent_decoder_heads=lpred_decoder_heads,
+        latent_decoder_heads=args.lpred_decoder_heads,
     )
 
     model.to(device)
