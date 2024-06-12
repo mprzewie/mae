@@ -262,9 +262,9 @@ class MaskedAutoencoderViT(nn.Module):
         # use only the cls token form the input x
         x = x + self.decoder_pos_embed
 
-
         for blk in self.l_decoder_blocks:
             x = blk(x)
+
         x = self.l_decoder_norm(x)
 
         # predictor projection

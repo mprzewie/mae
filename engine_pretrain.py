@@ -74,7 +74,10 @@ def train_one_epoch(model: torch.nn.Module,
             if not args.lpred_no_detach:
                 target_latent = target_latent.detach()
 
-            loss_latent = (latent_pred - target_latent).pow(2).mean()
+            if args.lpred_loss == "mse":
+                loss_latent = (latent_pred - target_latent).pow(2).mean()
+            elif args.lpred_loss == "cos":
+                loss_latent = - torch.nn.functional.cosine_similarity(latent_pred, target_latent, dim=-1).mean()
 
             loss_ce = torch.nn.functional.cross_entropy(outputs, targets)
 
