@@ -71,8 +71,8 @@ def train_one_epoch(model: torch.nn.Module,
                 loss_reg = uniformity_loss(cls_feats)
 
             target_latent = latent[:, 1:]
-            if not args.lpred_no_detach:
-                target_latent = target_latent.detach()
+            # if not args.lpred_no_detach:
+            target_latent = target_latent.detach()
 
             if args.lpred_loss == "mse":
                 loss_latent = (latent_pred - target_latent).pow(2).mean()

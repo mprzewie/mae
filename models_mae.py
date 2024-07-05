@@ -30,7 +30,8 @@ class MaskedAutoencoderViT(nn.Module):
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False,
                  global_pool=False, num_classes=1000,
                  *,
-                 latent_decoder_depth: int = 8, latent_decoder_heads: int = 16
+                 latent_decoder_depth: int = 8, latent_decoder_heads: int = 16,
+                 latent_loss_detach_classifier: bool = True
         ):
         super().__init__()
 
@@ -78,7 +79,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.l_decoder_norm = norm_layer(decoder_embed_dim)
         self.l_decoder_pred = nn.Linear(decoder_embed_dim, embed_dim, bias=True)  # decoder to patch
-
+        self.l_detach_cls = latent_loss_detach_classifier
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -312,7 +313,8 @@ class MaskedAutoencoderViT(nn.Module):
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
         mae_loss = self.forward_loss(imgs, pred, mask)
 
-        latent_pred = self.forward_l_decoder(latent, ids_restore)
+        l_decoder_input = latent.detach() if self.l_detach_cls else latent
+        latent_pred = self.forward_l_decoder(l_decoder_input, ids_restore)
 
         # get cls feature
         if self.global_pool:
