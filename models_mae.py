@@ -86,6 +86,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.initialize_weights()
         # new
         self.global_pool = global_pool
+        assert not self.global_pool
         self.fc_norm = norm_layer(embed_dim)
         self.fc = nn.Linear(embed_dim, num_classes, bias=True)
 
@@ -197,7 +198,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x_masked, mask, ids_restore
 
-    def forward_encoder(self, x, mask_ratio, mask_type="random"):
+    def forward_encoder(self, x, mask_ratio: float, mask_type="random"):
         # embed patches
         x = self.patch_embed(x)
 
@@ -326,9 +327,9 @@ class MaskedAutoencoderViT(nn.Module):
         return mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred)
 
 
-def mae_vit_tiny_patch16_dec192d4b(**kwargs):
+def mae_vit_tiny_patch16_dec192d4b(img_size=224, patch_size=16, **kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=16, embed_dim=192, depth=12, num_heads=3,
+        img_size=img_size, patch_size=patch_size, embed_dim=192, depth=12, num_heads=3,
         decoder_embed_dim=192, decoder_depth=4, decoder_num_heads=3,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model

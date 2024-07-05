@@ -132,3 +132,18 @@ def evaluate(data_loader, model, device):
           .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+@torch.no_grad()
+def calculate_effrank(data_loader, model, device):
+    Xs = []
+    for val_img, _ in data_loader:
+        val_img = val_img.to(device)
+        latent, mask, ids_restore, (x_blocks, attn) = model.forward_encoder(val_img, mask_ratio=0)
+        assert False, latent.shape
+        # TODO tu skonczylem
+        # loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples,
+        #                                                                                        mask_ratio=args.mask_ratio)
+
+        # features, _, _, _ = model.encoder.forward(val_img, mask_ratio=0)
+        cls_features = features[0]
+        Xs.append(cls_features.detach().cpu().numpy())

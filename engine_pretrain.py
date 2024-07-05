@@ -63,7 +63,7 @@ def train_one_epoch(model: torch.nn.Module,
             enabled=args.amp != "none",
             dtype=AMP_PRECISIONS[args.amp]
         ):
-            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model(samples, mask_ratio=args.mask_ratio)
+            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples, mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
                 loss_reg = torch.zeros_like(loss_mae)
@@ -78,8 +78,16 @@ def train_one_epoch(model: torch.nn.Module,
                 loss_latent = (latent_pred - target_latent).pow(2).mean()
             elif args.lpred_loss == "cos":
                 loss_latent = - torch.nn.functional.cosine_similarity(latent_pred, target_latent, dim=-1).mean()
+            else:
+                raise NotImplementedError(args.lpred_loss)
 
-            loss_ce = torch.nn.functional.cross_entropy(outputs, targets)
+            outputs_ce = outputs[targets>=0]
+            targets_ce = targets[targets>=0]
+
+            if len(targets_ce) > 0:
+                loss_ce = torch.nn.functional.cross_entropy(outputs_ce, targets_ce)
+            else:
+                loss_ce = torch.tensor(0.).to(device)
 
         loss = loss_mae + (args.lamb * loss_reg) + (args.lpred_lambda * loss_latent) + loss_ce
 

@@ -25,6 +25,7 @@ import torchvision.datasets as datasets
 import timm
 
 import timm.optim.optim_factory as optim_factory
+from torchvision.datasets import STL10
 
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -32,7 +33,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import models_mae
 
 from engine_pretrain import train_one_epoch, AMP_PRECISIONS
-from engine_finetune import evaluate
+from engine_finetune import evaluate, calculate_effrank
 
 
 def get_args_parser():
@@ -72,7 +73,7 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
+    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=Path,
                         help='dataset path')
 
     parser.add_argument('--output_dir', default='./output_dir',
@@ -104,7 +105,7 @@ def get_args_parser():
     # new
     parser.add_argument('--lamb', type=float, default=0)
     parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
-    parser.add_argument("--lpred_loss", type=str, default=["mse", "cos"], )
+    parser.add_argument("--lpred_loss", type=str, default="mse", choices=["mse", "cos"])
     parser.add_argument("--lpred_lambda", type=float, default=0., help="weight of loss of latent prediction from cls token")
     parser.add_argument("--lpred_no_detach", "-llndt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
@@ -139,17 +140,22 @@ def main(args):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     transform_val = transforms.Compose([
-        transforms.Resize(256, interpolation=3),
-        transforms.CenterCrop(224),
+        transforms.Resize(int(args.input_size * 16/14), interpolation=3),
+        transforms.CenterCrop(args.input_size),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    dataset_val = datasets.ImageFolder(os.path.join(args.data_path, 'val'), transform=transform_val)
+    if "stl10" not in str(args.data_path):
+        dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
+        dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
+    else:
+        dataset_train = STL10(args.data_path, split="train+unlabeled", transform=transform_train, download=True)
+        dataset_val = STL10(args.data_path, split='test', transform=transform_val, download=True)
+
     print(dataset_train)
     print(dataset_val)
 
-    if True:  # args.distributed:
+    if False: #True:  # args.distributed: # TODO rollback
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
         sampler_train = torch.utils.data.DistributedSampler(
@@ -163,9 +169,12 @@ def main(args):
         print("Sampler_val = %s" % str(sampler_val))
 
     else:
+        num_tasks = 1
+        global_rank = 0
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        sampler_val = torch.utils.data.RandomSampler(dataset_val)
 
-    eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
+    eff_batch_size = args.batch_size * args.accum_iter * num_tasks
     args.eff_batch_size = eff_batch_size
 
     if args.lr is None:  # only base_lr is specified
@@ -200,11 +209,20 @@ def main(args):
         drop_last=False
     )
 
+    size_patch_kwargs = dict()
+    if args.input_size != 224:
+        assert "tiny" in args.model
+        size_patch_kwargs=dict(
+            img_size=args.input_size,
+            patch_size=args.input_size // 16
+        )
+
     # define the model
     model = models_mae.__dict__[args.model](
         norm_pix_loss=args.norm_pix_loss,
         latent_decoder_depth=args.lpred_decoder_depth,
         latent_decoder_heads=args.lpred_decoder_heads,
+        **size_patch_kwargs
     )
 
     model.to(device)
@@ -218,7 +236,8 @@ def main(args):
         model_without_ddp = model.module
 
     # following timm: set wd as 0 for bias and norm layers
-    param_groups = optim_factory.add_weight_decay(model_without_ddp, args.weight_decay)
+    # param_groups = optim_factory.add_weight_decay(model_without_ddp, args.weight_decay)
+    param_groups = optim_factory.param_groups_weight_decay(model_without_ddp, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
     print(optimizer)
     loss_scaler = NativeScaler()
@@ -235,15 +254,17 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
-        train_stats = train_one_epoch(
-            model, data_loader_train,
-            optimizer, device, epoch, loss_scaler,
-            log_writer=log_writer,
-            args=args
-        )
+        # train_stats = train_one_epoch(
+        #     model, data_loader_train,
+        #     optimizer, device, epoch, loss_scaler,
+        #     log_writer=log_writer,
+        #     args=args
+        # )
 
         if epoch % args.val_interval == 0:
-            test_stats = evaluate(data_loader_val, model, device)
+            # test_stats = evaluate(data_loader_val, model, device)
+            effrank = calculate_effrank(data_loader_val, model, device)
+
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')
@@ -256,6 +277,7 @@ def main(args):
             log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
             log_writer.add_scalar('perf/test_acc5', test_stats['acc5'], epoch)
             log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
+
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
