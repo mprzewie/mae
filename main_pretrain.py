@@ -223,7 +223,7 @@ def main(args):
         norm_pix_loss=args.norm_pix_loss,
         latent_decoder_depth=args.lpred_decoder_depth,
         latent_decoder_heads=args.lpred_decoder_heads,
-        latent_loss_detach_classifier=args.latent_loss_detach_classifier,
+        latent_loss_detach_classifier=args.latent_loss_detach_cls,
         **size_patch_kwargs
     )
 
