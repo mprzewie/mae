@@ -155,7 +155,7 @@ def main(args):
     print(dataset_train)
     print(dataset_val)
 
-    if False: #True:  # args.distributed: # TODO rollback
+    if args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
         sampler_train = torch.utils.data.DistributedSampler(
@@ -228,8 +228,7 @@ def main(args):
     model.to(device)
 
     model_without_ddp = model
-    # print("Model = %s" % str(model_without_ddp))
-
+    print("Model = %s" % str(model_without_ddp))
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
@@ -254,33 +253,30 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
-        # train_stats = train_one_epoch(
-        #     model, data_loader_train,
-        #     optimizer, device, epoch, loss_scaler,
-        #     log_writer=log_writer,
-        #     args=args
-        # )
+        train_stats = train_one_epoch(
+            model, data_loader_train,
+            optimizer, device, epoch, loss_scaler,
+            log_writer=log_writer,
+            args=args
+        )
 
         if epoch % args.val_interval == 0:
-            # test_stats = evaluate(data_loader_val, model, device)
-            # effrank = calculate_effrank(data_loader_val, model, device)
-            #
-            # print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-            # max_accuracy = max(max_accuracy, test_stats["acc1"])
-            # print(f'Max accuracy: {max_accuracy:.2f}%')
-            # print(f"Effective rank: {effrank:.2f}")
-            mae_pred = draw_mae_predictions(dataset_val, model_without_ddp, device)
+            test_stats = evaluate(data_loader_val, model, device)
+            effrank = calculate_effrank(data_loader_val, model, device)
 
-            # val_imgs = next(data_loader_val)
-            # val_img = torch.stack([val_dataset[i][0] for i in range(16)])
-            # val_img = val_img.to(device)
-            #
+            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            max_accuracy = max(max_accuracy, test_stats["acc1"])
+            print(f'Max accuracy: {max_accuracy:.2f}%')
+            print(f"Effective rank: {effrank:.2f}")
+            mae_pred = draw_mae_predictions(dataset_val, model_without_ddp, device)
 
             if log_writer is not None:
                 log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
                 log_writer.add_scalar('perf/test_acc5', test_stats['acc5'], epoch)
                 log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
-                log_writer.add_scalar('perf/effrank', effrank, epoch)
+                log_writer.add_scalar('monitoring/effrank', effrank, epoch)
+                log_writer.add_image('monitoring/mae_image', (mae_pred + 1) / 2, global_step=epoch)
+
 
 
         if args.output_dir and (epoch % args.save_interval  == 0 or epoch + 1 == args.epochs):

@@ -15,6 +15,7 @@ from typing import Iterable, Optional
 
 import numpy as np
 import torch
+from einops import rearrange
 
 from timm.data import Mixup
 from timm.utils import accuracy
@@ -22,6 +23,7 @@ from tqdm import tqdm
 
 import util.misc as misc
 import util.lr_sched as lr_sched
+from models_mae import MaskedAutoencoderViT
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
@@ -134,6 +136,7 @@ def evaluate(data_loader, model, device):
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
+
 @torch.no_grad()
 def calculate_effrank(data_loader, model, device):
     Xs = []
@@ -151,15 +154,18 @@ def calculate_effrank(data_loader, model, device):
     effrank = np.exp(-H.sum())
     return effrank
 
+
 @torch.no_grad()
-def draw_mae_predictions(dataset, model, device):
+def draw_mae_predictions(dataset, model: MaskedAutoencoderViT, device):
     val_img = torch.stack([dataset[i][0] for i in range(16)]).to(device)
     mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred) = model(val_img)
     pred_img = model.unpatchify(pred)
     latent_pred_img_p = model.forward_decoder(latent, ids_restore)
     latent_pred_img = model.unpatchify(latent_pred_img_p)
 
-    # TODO - intepret mask correctly...
-
-
-    assert False, (val_img.shape, pred.shape, latent.shape, latent_pred.shape, pred_img.shape, latent_pred_img.shape, mask.shape)
+    patched_img = model.patchify(val_img)
+    masked_patched_img = patched_img * (mask.unsqueeze(2) - 1) * (-1)
+    masked_img = model.unpatchify(masked_patched_img)
+    img = torch.cat([val_img, masked_img, pred_img, latent_pred_img], dim=0)
+    img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=4)
+    return img
