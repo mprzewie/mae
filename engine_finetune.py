@@ -13,6 +13,7 @@ import math
 import sys
 from typing import Iterable, Optional
 
+import numpy as np
 import torch
 
 from timm.data import Mixup
@@ -139,11 +140,26 @@ def calculate_effrank(data_loader, model, device):
     for val_img, _ in data_loader:
         val_img = val_img.to(device)
         latent, mask, ids_restore, (x_blocks, attn) = model.forward_encoder(val_img, mask_ratio=0)
-        assert False, latent.shape
-        # TODO tu skonczylem
-        # loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples,
-        #                                                                                        mask_ratio=args.mask_ratio)
-
-        # features, _, _, _ = model.encoder.forward(val_img, mask_ratio=0)
-        cls_features = features[0]
+        cls_features = latent[:, 0]
         Xs.append(cls_features.detach().cpu().numpy())
+
+    Xs = np.concatenate(Xs, axis=0)
+    U, D, V = np.linalg.svd(Xs)
+    D_l1 = np.abs(D).sum()
+    P = D / D_l1
+    H = P * np.log(P)
+    effrank = np.exp(-H.sum())
+    return effrank
+
+@torch.no_grad()
+def draw_mae_predictions(dataset, model, device):
+    val_img = torch.stack([dataset[i][0] for i in range(16)]).to(device)
+    mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred) = model(val_img)
+    pred_img = model.unpatchify(pred)
+    latent_pred_img_p = model.forward_decoder(latent, ids_restore)
+    latent_pred_img = model.unpatchify(latent_pred_img_p)
+
+    # TODO - intepret mask correctly...
+
+
+    assert False, (val_img.shape, pred.shape, latent.shape, latent_pred.shape, pred_img.shape, latent_pred_img.shape, mask.shape)

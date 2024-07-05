@@ -254,7 +254,6 @@ class MaskedAutoencoderViT(nn.Module):
         B, FT = ids_restore.shape
 
         x = self.l_decoder_embed(x)
-        
 
         mask_tokens = self.l_mask_token.repeat(B, FT, 1)
 
@@ -320,7 +319,7 @@ class MaskedAutoencoderViT(nn.Module):
             cls_feats = latent[:, 1:, :].mean(dim=1)  # global pool without cls token
             cls_feats = self.fc_norm(cls_feats)
         else:
-            cls_feats = self.norm(latent)
+            cls_feats = self.fc_norm(latent)
             cls_feats = cls_feats[:, 0]
         outputs = self.fc(cls_feats.detach())
 

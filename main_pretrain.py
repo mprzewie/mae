@@ -33,7 +33,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import models_mae
 
 from engine_pretrain import train_one_epoch, AMP_PRECISIONS
-from engine_finetune import evaluate, calculate_effrank
+from engine_finetune import evaluate, calculate_effrank, draw_mae_predictions
 
 
 def get_args_parser():
@@ -211,7 +211,7 @@ def main(args):
 
     size_patch_kwargs = dict()
     if args.input_size != 224:
-        assert "tiny" in args.model
+        assert "tiny" in args.model, f"{args.model=}, {args.input_size=}"
         size_patch_kwargs=dict(
             img_size=args.input_size,
             patch_size=args.input_size // 16
@@ -228,7 +228,7 @@ def main(args):
     model.to(device)
 
     model_without_ddp = model
-    print("Model = %s" % str(model_without_ddp))
+    # print("Model = %s" % str(model_without_ddp))
 
 
     if args.distributed:
@@ -263,20 +263,31 @@ def main(args):
 
         if epoch % args.val_interval == 0:
             # test_stats = evaluate(data_loader_val, model, device)
-            effrank = calculate_effrank(data_loader_val, model, device)
+            # effrank = calculate_effrank(data_loader_val, model, device)
+            #
+            # print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            # max_accuracy = max(max_accuracy, test_stats["acc1"])
+            # print(f'Max accuracy: {max_accuracy:.2f}%')
+            # print(f"Effective rank: {effrank:.2f}")
+            mae_pred = draw_mae_predictions(dataset_val, model_without_ddp, device)
 
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        max_accuracy = max(max_accuracy, test_stats["acc1"])
-        print(f'Max accuracy: {max_accuracy:.2f}%')
+            # val_imgs = next(data_loader_val)
+            # val_img = torch.stack([val_dataset[i][0] for i in range(16)])
+            # val_img = val_img.to(device)
+            #
+
+            if log_writer is not None:
+                log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
+                log_writer.add_scalar('perf/test_acc5', test_stats['acc5'], epoch)
+                log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
+                log_writer.add_scalar('perf/effrank', effrank, epoch)
+
 
         if args.output_dir and (epoch % args.save_interval  == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler, epoch=epoch, test_stats=test_stats)
 
-        if log_writer is not None:
-            log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
-            log_writer.add_scalar('perf/test_acc5', test_stats['acc5'], epoch)
-            log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
+
 
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
