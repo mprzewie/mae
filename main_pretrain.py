@@ -264,7 +264,7 @@ def main(args):
 
         if epoch % args.val_interval == 0:
             test_stats = evaluate(data_loader_val, model, device)
-            effrank = calculate_effrank(data_loader_val, model, device)
+            effrank = calculate_effrank(data_loader_val, model_without_ddp, device)
 
             print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
             max_accuracy = max(max_accuracy, test_stats["acc1"])
