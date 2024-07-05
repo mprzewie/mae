@@ -160,7 +160,7 @@ def draw_mae_predictions(dataset, model: MaskedAutoencoderViT, device):
     val_img = torch.stack([dataset[i][0] for i in range(16)]).to(device)
     mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred) = model(val_img)
     pred_img = model.unpatchify(pred)
-    latent_pred_img_p = model.forward_decoder(latent, ids_restore)
+    latent_pred_img_p = model.forward_decoder(latent_pred, ids_restore)
     latent_pred_img = model.unpatchify(latent_pred_img_p)
 
     patched_img = model.patchify(val_img)
