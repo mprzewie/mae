@@ -202,8 +202,8 @@ def main(args):
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
         # batch_size=12,
-        batch_size=512,
-        # batch_size=args.batch_size,
+        # batch_size=512,
+        batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False,
@@ -212,12 +212,20 @@ def main(args):
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, sampler=sampler_val,
         # batch_size=12,
-        batch_size=512,
-        # batch_size=args.batch_size,
+        # batch_size=512,
+        batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False
     )
+
+    size_patch_kwargs = dict()
+    if args.input_size != 224:
+        assert "tiny" in args.model, f"{args.model=}, {args.input_size=}"
+        size_patch_kwargs=dict(
+            img_size=args.input_size,
+            patch_size=args.input_size // 16
+        )
 
     model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
