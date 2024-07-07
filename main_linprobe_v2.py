@@ -30,7 +30,7 @@ import torchvision.datasets as datasets
 from torch.utils.data import TensorDataset
 import timm
 import gc
-import nvidia_smi
+# import nvidia_smi
 
 # nvidia_smi.nvmlInit()
 # assert timm.__version__ == "0.3.2" # version check
@@ -149,13 +149,13 @@ def main(args):
 
     # linear probe: weak augmentation
     transform_train = transforms.Compose([
-            RandomResizedCrop(224, interpolation=3),
+            RandomResizedCrop(args.input_size, interpolation=3),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     transform_val = transforms.Compose([
-            transforms.Resize(256, interpolation=3),
-            transforms.CenterCrop(224),
+            transforms.Resize(int(args.input_size * 16 / 14), interpolation=3),
+            transforms.CenterCrop(args.input_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
@@ -232,8 +232,11 @@ def main(args):
         num_classes=args.nb_classes,
         global_pool=False, #args.global_pool,
         n_last_layers=args.n_last_layers,
-        block_reshuffling=args.block_reshuffling
+        block_reshuffling=args.block_reshuffling,
+        **size_patch_kwargs
     )
+    print(model)
+
     classifier = AggHead(model.head, agg_method=args.agg_method)
 
     if args.finetune and not args.eval:
