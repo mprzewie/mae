@@ -24,6 +24,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import timm
+from torchvision.datasets import STL10
 
 # assert timm.__version__ == "0.3.2" # version check
 # from timm.models.layers import trunc_normal_
@@ -139,8 +140,15 @@ def main(args):
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    dataset_val = datasets.ImageFolder(os.path.join(args.data_path, 'val'), transform=transform_val)
+
+
+    if "stl10" not in str(args.data_path):
+        dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
+        dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
+    else:
+        dataset_train = STL10(args.data_path, split="train", transform=transform_train, download=True)
+        dataset_val = STL10(args.data_path, split='test', transform=transform_val, download=True)
+
     print(dataset_train)
     print(dataset_val)
 
