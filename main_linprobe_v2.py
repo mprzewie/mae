@@ -62,7 +62,8 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='vit_base_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
-
+    parser.add_argument('--input_size', default=224, type=int,
+                        help='images input size')
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0 for linear probe following MoCo v1)')
