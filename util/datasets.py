@@ -9,6 +9,8 @@
 # --------------------------------------------------------
 
 import os
+from typing import Type
+
 import PIL
 
 from torchvision import datasets, transforms
@@ -16,6 +18,40 @@ from torchvision import datasets, transforms
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
+
+def build_dataset_v2(args, is_pretrain: bool):
+    transform_train = transforms.Compose([
+        transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    transform_val = transforms.Compose([
+        transforms.Resize(int(args.input_size * 16/14), interpolation=3),
+        transforms.CenterCrop(args.input_size),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+
+    args.dataset_name = args.data_path.name
+
+    if "cifar" in args.dataset_name:
+        assert args.input_size == 32
+        CIFAR_DS: Type[datasets.CIFAR10] = datasets.CIFAR10 if args.dataset_name == 'cifar10' else datasets.CIFAR100
+        trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize(0.5, 0.5)])
+        dataset_train = CIFAR_DS(args.data_path, train=True, download=True, transform=trans)
+        dataset_val = CIFAR_DS(args.data_path, train=False, download=True, transform=trans)
+
+    elif "stl10" not in args.dataset_name:
+        dataset_train =  datasets.STL10(
+            args.data_path,
+            split=("train+unlabeled" if is_pretrain else "train"),
+            transform=transform_train, download=True
+        )
+        dataset_val = datasets.STL10(args.data_path, split='test', transform=transform_val, download=True)
+    else:
+        dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
+        dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
+
+    return dataset_train, dataset_val
 
 def build_dataset(is_train, args):
     transform = build_transform(is_train, args)

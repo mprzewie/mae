@@ -13,6 +13,7 @@ import argparse
 import datetime
 import json
 from copy import deepcopy
+from typing import Type
 
 import numpy as np
 import os
@@ -22,6 +23,7 @@ from pathlib import Path
 import psutil
 import torch
 import torch.backends.cudnn as cudnn
+import torchvision
 from timm.utils import accuracy
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
@@ -39,6 +41,7 @@ from torchvision.datasets import STL10
 from tqdm import tqdm
 
 import util.misc as misc
+from util.datasets import build_dataset_v2
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.lars import LARS
@@ -148,23 +151,7 @@ def main(args):
     cudnn.benchmark = True
 
     # linear probe: weak augmentation
-    transform_train = transforms.Compose([
-            RandomResizedCrop(args.input_size, interpolation=3),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    transform_val = transforms.Compose([
-            transforms.Resize(int(args.input_size * 16 / 14), interpolation=3),
-            transforms.CenterCrop(args.input_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-
-    if "stl10" not in str(args.data_path):
-        dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
-        dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
-    else:
-        dataset_train = STL10(args.data_path, split="train", transform=transform_train, download=True)
-        dataset_val = STL10(args.data_path, split='test', transform=transform_val, download=True)
+    dataset_train, dataset_val = build_dataset_v2(args, is_pretrain=False)
 
     print(dataset_train)
     print(dataset_val)

@@ -11,6 +11,8 @@
 import argparse
 import datetime
 import json
+from typing import Type
+
 import numpy as np
 import os
 import time
@@ -18,6 +20,7 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+import torchvision
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -28,6 +31,7 @@ import timm.optim.optim_factory as optim_factory
 from torchvision.datasets import STL10
 
 import util.misc as misc
+from util.datasets import build_dataset_v2
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_mae
@@ -73,8 +77,7 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=Path,
-                        help='dataset path')
+    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=Path, help='dataset path')
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
@@ -135,23 +138,8 @@ def main(args):
     cudnn.benchmark = True
 
     # simple augmentation
-    transform_train = transforms.Compose([
-        transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    transform_val = transforms.Compose([
-        transforms.Resize(int(args.input_size * 16/14), interpolation=3),
-        transforms.CenterCrop(args.input_size),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    dataset_train, dataset_val = build_dataset_v2(args, is_pretrain=True)
 
-    if "stl10" not in str(args.data_path):
-        dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
-        dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
-    else:
-        dataset_train = STL10(args.data_path, split="train+unlabeled", transform=transform_train, download=True)
-        dataset_val = STL10(args.data_path, split='test', transform=transform_val, download=True)
 
     print(dataset_train)
     print(dataset_val)
@@ -212,8 +200,8 @@ def main(args):
 
     size_patch_kwargs = dict()
     if args.input_size != 224:
-        assert "tiny" in args.model, f"{args.model=}, {args.input_size=}"
-        size_patch_kwargs=dict(
+        assert args.input_size % 16 == 0, args.input_size
+        size_patch_kwargs = dict(
             img_size=args.input_size,
             patch_size=args.input_size // 16
         )
