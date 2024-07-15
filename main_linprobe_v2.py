@@ -209,7 +209,7 @@ def main(args):
 
     size_patch_kwargs = dict()
     if args.input_size != 224:
-        assert "tiny" in args.model, f"{args.model=}, {args.input_size=}"
+        assert args.input_size % 16 == 0, args.input_size
         size_patch_kwargs=dict(
             img_size=args.input_size,
             patch_size=args.input_size // 16
