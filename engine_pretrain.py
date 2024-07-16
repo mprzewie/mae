@@ -20,9 +20,9 @@ from torch.utils.tensorboard import SummaryWriter
 import util.misc as misc
 import util.lr_sched as lr_sched
 
-import torch.distributed as dist
 
-from loss_func import uniformity_loss
+from loss_func import uniformity_loss, ClsPosLoss
+from models_mae import MaskedAutoencoderViT
 
 AMP_PRECISIONS = {
     "float16": torch.float16,
@@ -32,10 +32,11 @@ AMP_PRECISIONS = {
 }
 
 
-def train_one_epoch(model: torch.nn.Module,
+def train_one_epoch(model: MaskedAutoencoderViT,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,
-                    log_writer: SummaryWriter=None,
+                    cls_pos_loss: ClsPosLoss,
+                    log_writer: SummaryWriter = None,
                     args=None):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -60,10 +61,11 @@ def train_one_epoch(model: torch.nn.Module,
         targets = targets.to(device, non_blocking=True)
 
         with torch.cuda.amp.autocast(
-            enabled=args.amp != "none",
-            dtype=AMP_PRECISIONS[args.amp]
+                enabled=args.amp != "none",
+                dtype=AMP_PRECISIONS[args.amp]
         ):
-            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples, mask_ratio=args.mask_ratio)
+            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples,
+                                                                                                   mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
                 loss_reg = torch.zeros_like(loss_mae)
@@ -71,18 +73,11 @@ def train_one_epoch(model: torch.nn.Module,
                 loss_reg = uniformity_loss(cls_feats)
 
             target_latent = latent[:, 1:]
-            # if not args.lpred_no_detach:
-            target_latent = target_latent.detach()
 
-            if args.lpred_loss == "mse":
-                loss_latent = (latent_pred - target_latent).pow(2).mean()
-            elif args.lpred_loss == "cos":
-                loss_latent = - torch.nn.functional.cosine_similarity(latent_pred, target_latent, dim=-1).mean()
-            else:
-                raise NotImplementedError(args.lpred_loss)
+            loss_latent = cls_pos_loss.forward(target_latent, latent_pred, epoch=epoch)
 
-            outputs_ce = outputs[targets>=0]
-            targets_ce = targets[targets>=0]
+            outputs_ce = outputs[targets >= 0]
+            targets_ce = targets[targets >= 0]
 
             if len(targets_ce) > 0:
                 loss_ce = torch.nn.functional.cross_entropy(outputs_ce, targets_ce)
@@ -133,7 +128,6 @@ def train_one_epoch(model: torch.nn.Module,
         }
         assert not any([math.isnan(l) for l in losses.values()]), losses
 
-
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
@@ -147,7 +141,6 @@ def train_one_epoch(model: torch.nn.Module,
             log_writer.add_scalar('train_acc', train_acc_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
             log_writer.add_scalar("epoch", epoch, epoch_1000x)
-
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

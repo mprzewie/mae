@@ -88,6 +88,7 @@ class MaskedAutoencoderViT(nn.Module):
         # new
         self.global_pool = global_pool
         assert not self.global_pool
+        self.embed_dim = embed_dim
         self.fc_norm = norm_layer(embed_dim)
         self.fc = nn.Linear(embed_dim, num_classes, bias=True)
 

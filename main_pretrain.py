@@ -31,6 +31,7 @@ import timm.optim.optim_factory as optim_factory
 from torchvision.datasets import STL10
 
 import util.misc as misc
+from loss_func import ClsPosLoss
 from util.datasets import build_dataset_v2
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
@@ -108,7 +109,7 @@ def get_args_parser():
     # new
     parser.add_argument('--lamb', type=float, default=0)
     parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
-    parser.add_argument("--lpred_loss", type=str, default="mse", choices=["mse", "cos"])
+    parser.add_argument("--lpred_loss", type=str, default="mse", choices=["mse", "cos", "dino"])
     parser.add_argument("--lpred_lambda", type=float, default=0., help="weight of loss of latent prediction from cls token")
     # parser.add_argument("--lpred_no_detach", "-llndt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
     parser.add_argument("--latent_loss_detach_cls", "-lldc", action="store_true", default=False)
@@ -217,7 +218,7 @@ def main(args):
 
     model.to(device)
 
-    model_without_ddp = model
+    model_without_ddp: models_mae.MaskedAutoencoderViT = model
     print("Model = %s" % str(model_without_ddp))
 
     if args.distributed:
@@ -230,6 +231,15 @@ def main(args):
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
     print(optimizer)
     loss_scaler = NativeScaler()
+    cls_pos_loss = ClsPosLoss(
+        args.lpred_loss,
+        out_dim=model_without_ddp.embed_dim, # TODO
+        warmup_teacher_temp=0.04,
+        teacher_temp=0.04,
+        warmup_teacher_temp_epochs=30,
+        nepochs= args.epochs,
+    )
+
 
     test_stats = misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
@@ -246,6 +256,7 @@ def main(args):
         train_stats = train_one_epoch(
             model, data_loader_train,
             optimizer, device, epoch, loss_scaler,
+            cls_pos_loss=cls_pos_loss,
             log_writer=log_writer,
             args=args
         )

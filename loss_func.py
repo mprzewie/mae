@@ -1,5 +1,10 @@
+import numpy as np
 import torch
 import torch.distributed as dist
+from torch import nn
+import torch.nn.functional as F
+
+from util.misc import is_dist_avail_and_initialized
 
 
 def uniformity_loss(features):
@@ -11,6 +16,63 @@ def uniformity_loss(features):
     loss = sim.pow(2).mean()
     return loss
 
+class ClsPosLoss(nn.Module):
+    def __init__(
+            self,
+            loss_type: str, out_dim: int,
+            *,
+            warmup_teacher_temp, teacher_temp,
+            warmup_teacher_temp_epochs, nepochs,
+            center_momentum=0.9
+    ):
+        super().__init__()
+        self.loss_type = loss_type
+
+
+        self.register_buffer("center", torch.zeros(1, out_dim))
+        self.teacher_temp_schedule = np.concatenate((
+            np.linspace(warmup_teacher_temp,
+                        teacher_temp, warmup_teacher_temp_epochs),
+            np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp
+        ))
+        self.center_momentum = center_momentum
+
+    def forward(self, t_latent, p_latent, epoch: int):
+        t_latent = t_latent.detach()
+        assert t_latent.shape == p_latent.shape
+
+        if self.loss_type == "mse":
+            loss_latent = (p_latent - t_latent).pow(2).mean()
+        elif self.loss_type == "cos":
+            loss_latent = - torch.nn.functional.cosine_similarity(p_latent, t_latent, dim=-1).mean()
+        elif self.loss_type == "dino":
+            B, T, D = t_latent.shape
+            t_latent = t_latent.reshape(B * T, D)
+            p_latent = p_latent.reshape(B * T, D)
+            temp = self.teacher_temp_schedule[epoch]
+            t = F.softmax((t_latent - self.center) / temp, dim=-1)
+            loss_latent = (-t * F.log_softmax(p_latent, dim=-1)).sum(dim=-1).mean()
+            self.update_center(t_latent)
+
+        else:
+            raise NotImplementedError(self.loss_type)
+
+        return loss_latent
+
+    @torch.no_grad()
+    def update_center(self, teacher_output):
+        """
+        Update center used for teacher output.
+        """
+        batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
+        ws = 1
+        if is_dist_avail_and_initialized():
+            dist.all_reduce(batch_center)
+            ws = dist.get_world_size()
+
+        batch_center = batch_center / (len(teacher_output) * ws)
+        # ema update
+        self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
 
 class GatherLayer(torch.autograd.Function):
     """Gather tensors from all process, supporting backward propagation."""
