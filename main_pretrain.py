@@ -239,6 +239,7 @@ def main(args):
         warmup_teacher_temp_epochs=args.warmup_epochs,
         nepochs=args.epochs,
     )
+    cls_pos_loss.to(device)
 
 
     test_stats = misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
