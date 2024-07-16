@@ -233,11 +233,11 @@ def main(args):
     loss_scaler = NativeScaler()
     cls_pos_loss = ClsPosLoss(
         args.lpred_loss,
-        out_dim=model_without_ddp.embed_dim, # TODO
+        out_dim=model_without_ddp.embed_dim,
         warmup_teacher_temp=0.04,
         teacher_temp=0.04,
-        warmup_teacher_temp_epochs=30,
-        nepochs= args.epochs,
+        warmup_teacher_temp_epochs=args.warmup_epochs,
+        nepochs=args.epochs,
     )
 
 
