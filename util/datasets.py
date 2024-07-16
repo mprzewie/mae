@@ -40,7 +40,7 @@ def build_dataset_v2(args, is_pretrain: bool):
         dataset_train = CIFAR_DS(args.data_path, train=True, download=True, transform=trans)
         dataset_val = CIFAR_DS(args.data_path, train=False, download=True, transform=trans)
 
-    elif "stl10" not in args.dataset_name:
+    elif "stl10" in args.dataset_name:
         dataset_train =  datasets.STL10(
             args.data_path,
             split=("train+unlabeled" if is_pretrain else "train"),
