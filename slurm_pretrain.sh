@@ -13,7 +13,7 @@ N_GPUS=${#CVD[@]}
 export WORLD_SIZE=$(($SLURM_NNODES * $SLURM_NTASKS_PER_NODE))
 
 HOSTS=($(scontrol show hostnames "$SLURM_JOB_NODELIST"))
-MASTER_ADDR=${HOSTS[0]}
+ADDR=${HOSTS[0]}
 MASTER_IP=$(nslookup $MASTER_ADDR | awk '/^Address: / { print $2 }')
 
 if [ -n "$RESUME_EPOCH" ]; then
@@ -21,21 +21,34 @@ if [ -n "$RESUME_EPOCH" ]; then
 fi
 
 BASE_PORT=29500
-INCREMENT=1
-port=$BASE_PORT
-# isfree=$(netstat -taln | grep $port)
-# while [[ -n "$isfree" ]]; do
-#     port=$[port+INCREMENT]
-#     isfree=$(netstat -taln | grep $port)
-# done
-# echo "Usable Port: $port"
+
+
+# Function to check if a port is free
+is_port_free() {
+    local port=$1
+    ! ss -ltn | grep -q ":$port "
+    #! grep -q ":$port" /proc/net/tcp
+    #nc -w 5 -z $ADDR $port &>/dev/null
+    return $?
+}
+
+# Loop to find a free port
+while true; do
+    if is_port_free $BASE_PORT; then
+        echo "Found free port: $BASE_PORT"
+        break
+    else
+        ((BASE_PORT++))
+    fi
+done
 
 for N in `seq 0 $(($SLURM_NNODES-1))`;
 do
     srun -N1 --nodelist=${HOSTS[N]} --cpus-per-task $SLURM_CPUS_PER_TASK --mem-per-cpu=6G \
 	  conda run --no-capture-output  -n pt2 \
-	    torchrun --nproc_per_node $N_GPUS --nnodes $SLURM_NNODES --node_rank $N --master-addr $MASTER_IP --master-port $port  \
-	      main_pretrain.py --batch_size $BS --model "mae_${MODEL}" --norm_pix_loss --mask_ratio 0.75 --epochs $EPOCHS --warmup_epochs 40 --blr 1.5e-4 --weight_decay 0.05 --num_workers 32 --data_path $DATA_PATH --lamb 0.01 --lpred_decoder_depth $LPRED_DECODER_DEPTH --lpred_decoder_heads $LPRED_DECODER_HEADS --umae_reg $REG --lpred_loss $LPRED_LOSS --lpred_lambda $LPRED_LAMBDA $LPRED_DETACH --norm_pix_loss $RESUME --output_dir $OUT --log_dir $OUT --amp $AMP &
+	    torchrun --nproc_per_node $N_GPUS --nnodes $SLURM_NNODES --node_rank $N --master-addr $ADDR --master-port $BASE_PORT \
+	      main_pretrain.py --batch_size $BS --model "mae_${MODEL}" --input_size $INPUT_SIZE --mask_ratio 0.75 --epochs $EPOCHS --warmup_epochs 40 --blr 1.5e-4 --weight_decay 0.05 --num_workers 32 --data_path $DATA_PATH --lamb $UMAE_LAMBDA --lpred_decoder_depth $LPRED_DECODER_DEPTH --lpred_decoder_heads $LPRED_DECODER_HEADS --umae_reg $REG --lpred_loss $LPRED_LOSS --lpred_lambda $LPRED_LAMBDA $LPRED_DETACH $NPL $RESUME --output_dir $OUT --log_dir $OUT --amp $AMP & 
+# --norm_pix_loss
 
 done
 
