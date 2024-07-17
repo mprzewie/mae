@@ -10,6 +10,7 @@
 # --------------------------------------------------------
 
 from functools import partial
+from typing import Literal
 
 import numpy as np
 import torch
@@ -31,7 +32,8 @@ class MaskedAutoencoderViT(nn.Module):
                  global_pool=False, num_classes=1000,
                  *,
                  latent_decoder_depth: int = 8, latent_decoder_heads: int = 16,
-                 latent_loss_detach_classifier: bool = True
+                 latent_loss_detach_classifier: bool = True,
+                 latent_cls_input: Literal["cls", "pos"] = "cls"
         ):
         super().__init__()
 
@@ -80,6 +82,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.l_decoder_norm = norm_layer(decoder_embed_dim)
         self.l_decoder_pred = nn.Linear(decoder_embed_dim, embed_dim, bias=True)  # decoder to patch
         self.l_detach_cls = latent_loss_detach_classifier
+        self.l_cls_input = latent_cls_input
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -257,9 +260,16 @@ class MaskedAutoencoderViT(nn.Module):
 
         x = self.l_decoder_embed(x)
 
-        mask_tokens = self.l_mask_token.repeat(B, FT, 1)
-
         cls_features = x[:, :1]
+
+        if self.l_cls_input == "cls":
+            mask_tokens = self.l_mask_token.repeat(B, FT, 1)
+        elif self.l_cls_input == "pos":
+            mask_tokens = cls_features.repeat(1, FT, 1)
+        else:
+            raise NotImplementedError(self.l_cls_input)
+        assert False, (cls_features.shape, mask_tokens.shape)
+
         x = torch.cat([cls_features, mask_tokens], dim=1)
         # use only the cls token form the input x
         x = x + self.decoder_pos_embed

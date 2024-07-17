@@ -21,8 +21,10 @@ class ClsPosLoss(nn.Module):
             self,
             loss_type: str, out_dim: int,
             *,
-            warmup_teacher_temp, teacher_temp,
-            warmup_teacher_temp_epochs, nepochs,
+            number_of_epochs,
+            warmup_teacher_temp_epochs,
+            warmup_teacher_temp=0.04,
+            teacher_temp=0.04,
             center_momentum=0.9
     ):
         super().__init__()
@@ -33,7 +35,7 @@ class ClsPosLoss(nn.Module):
         self.teacher_temp_schedule = np.concatenate((
             np.linspace(warmup_teacher_temp,
                         teacher_temp, warmup_teacher_temp_epochs),
-            np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp
+            np.ones(number_of_epochs - warmup_teacher_temp_epochs) * teacher_temp
         ))
         self.center_momentum = center_momentum
 

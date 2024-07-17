@@ -115,6 +115,7 @@ def get_args_parser():
     parser.add_argument("--latent_loss_detach_cls", "-lldc", action="store_true", default=False)
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
     parser.add_argument("--lpred_decoder_heads", type=int, default=16)
+    parser.add_argument("--latent_cls_input", "-lci", choices=["cls", "pos"], default="cls")
 
     parser.add_argument('--val_interval', default=10, type=int)
     parser.add_argument('--save_interval', default=50, type=int)
@@ -213,6 +214,7 @@ def main(args):
         latent_decoder_depth=args.lpred_decoder_depth,
         latent_decoder_heads=args.lpred_decoder_heads,
         latent_loss_detach_classifier=args.latent_loss_detach_cls,
+        latent_cls_input=args.latent_cls_input,
         **size_patch_kwargs
     )
 
@@ -234,10 +236,8 @@ def main(args):
     cls_pos_loss = ClsPosLoss(
         args.lpred_loss,
         out_dim=model_without_ddp.embed_dim,
-        warmup_teacher_temp=0.04,
-        teacher_temp=0.04,
         warmup_teacher_temp_epochs=args.warmup_epochs,
-        nepochs=args.epochs,
+        number_of_epochs=args.epochs,
     )
     cls_pos_loss.to(device)
 
