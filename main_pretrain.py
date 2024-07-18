@@ -113,6 +113,7 @@ def get_args_parser():
     parser.add_argument("--lpred_lambda", type=float, default=0., help="weight of loss of latent prediction from cls token")
     # parser.add_argument("--lpred_no_detach", "-llndt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
     parser.add_argument("--latent_loss_detach_cls", "-lldc", action="store_true", default=False)
+    parser.add_argument("--lpred_decoder_arch", "-lda", choices=["vit", "mlp"], default="vit")
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
     parser.add_argument("--lpred_decoder_heads", type=int, default=16)
     parser.add_argument("--latent_cls_input", "-lci", choices=["cls", "pos"], default="cls")
@@ -211,6 +212,7 @@ def main(args):
     # define the model
     model = models_mae.__dict__[args.model](
         norm_pix_loss=args.norm_pix_loss,
+        latent_decoder_arch=args.lpred_decoder_arch,
         latent_decoder_depth=args.lpred_decoder_depth,
         latent_decoder_heads=args.lpred_decoder_heads,
         latent_loss_detach_classifier=args.latent_loss_detach_cls,

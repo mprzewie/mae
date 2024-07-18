@@ -31,6 +31,7 @@ class MaskedAutoencoderViT(nn.Module):
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False,
                  global_pool=False, num_classes=1000,
                  *,
+                 latent_decoder_arch: str,
                  latent_decoder_depth: int = 8, latent_decoder_heads: int = 16,
                  latent_loss_detach_classifier: bool = True,
                  latent_cls_input: Literal["cls", "pos"] = "cls"
@@ -47,9 +48,9 @@ class MaskedAutoencoderViT(nn.Module):
                                       requires_grad=False)  # fixed sin-cos embedding
 
         self.blocks = nn.ModuleList([
-            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True,
-                  norm_layer=norm_layer)
-            for i in range(depth)])
+            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+            for i in range(depth)
+        ])
         self.norm = norm_layer(embed_dim)
         # --------------------------------------------------------------------------
 
@@ -63,26 +64,34 @@ class MaskedAutoencoderViT(nn.Module):
                                               requires_grad=False)  # fixed sin-cos embedding
 
         self.decoder_blocks = nn.ModuleList([
-            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True,
-                  # qk_scale=None,
-                  norm_layer=norm_layer)
-            for i in range(decoder_depth)])
+            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+            for i in range(decoder_depth)
+        ])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)  # decoder to patch
         # --------------------------------------------------------------------------
 
+        self.l_decoder_arch = latent_decoder_arch
+        self.l_detach_cls = latent_loss_detach_classifier
         self.l_decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
-        self.l_mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
-        self.l_decoder_blocks = nn.ModuleList([
-            Block(decoder_embed_dim, latent_decoder_heads, mlp_ratio, qkv_bias=True,
-                  norm_layer=norm_layer)
-            for i in range(latent_decoder_depth)])
-
         self.l_decoder_norm = norm_layer(decoder_embed_dim)
         self.l_decoder_pred = nn.Linear(decoder_embed_dim, embed_dim, bias=True)  # decoder to patch
-        self.l_detach_cls = latent_loss_detach_classifier
-        self.l_cls_input = latent_cls_input
+
+        if self.l_decoder_arch == "vit":
+            self.l_cls_input = latent_cls_input
+            self.l_mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
+            self.l_decoder_blocks = nn.ModuleList([
+                Block(decoder_embed_dim, latent_decoder_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+                for i in range(latent_decoder_depth)
+            ])
+        elif self.l_decoder_arch == "mlp":
+            ldmlp = [nn.Linear(2*decoder_embed_dim, decoder_embed_dim)]
+            for _ in range(latent_decoder_depth - 1):
+                ldmlp.extend([nn.ReLU(), nn.Linear(decoder_embed_dim, decoder_embed_dim)])
+            self.l_decoder_mlp = nn.Sequential(*ldmlp)
+        else:
+            raise NotImplementedError(self.l_decoder_arch)
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -98,12 +107,10 @@ class MaskedAutoencoderViT(nn.Module):
     def initialize_weights(self):
         # initialization
         # initialize (and freeze) pos_embed by sin-cos embedding
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches ** .5),
-                                            cls_token=True)
+        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches ** .5), cls_token=True)
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-        decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1],
-                                                    int(self.patch_embed.num_patches ** .5), cls_token=True)
+        decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches ** .5), cls_token=True)
         self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
         # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
@@ -254,48 +261,45 @@ class MaskedAutoencoderViT(nn.Module):
         return x
 
     def forward_l_decoder(self, x, ids_restore):
-        x_init = x
         B, T, D = x.shape
         B, FT = ids_restore.shape
-
         x = self.l_decoder_embed(x)
 
         cls_features = x[:, :1]
 
-        if self.l_cls_input == "cls":
-            mask_tokens = self.l_mask_token.repeat(B, FT, 1)
-        elif self.l_cls_input == "pos":
-            mask_tokens = cls_features.repeat(1, FT, 1)
-        else:
-            raise NotImplementedError(self.l_cls_input)
+        if self.l_decoder_arch == "vit":
+            if self.l_cls_input == "cls":
+                mask_tokens = self.l_mask_token.repeat(B, FT, 1)
+            elif self.l_cls_input == "pos":
+                mask_tokens = cls_features.repeat(1, FT, 1)
+            else:
+                raise NotImplementedError(self.l_cls_input)
 
-        x = torch.cat([cls_features, mask_tokens], dim=1)
-        # use only the cls token form the input x
-        x = x + self.decoder_pos_embed
+            x = torch.cat([cls_features, mask_tokens], dim=1)
+            # use only the cls token form the input x
+            x = x + self.decoder_pos_embed
 
-        for blk in self.l_decoder_blocks:
-            x = blk(x)
+            for blk in self.l_decoder_blocks:
+                x = blk(x)
+
+        elif self.l_decoder_arch == "mlp":
+            x = cls_features.repeat(1, FT+1, 1)
+            pos_emb = self.decoder_pos_embed.repeat(B, 1, 1)
+            x_cat = torch.cat([x, pos_emb], dim=2)
+            x = self.l_decoder_mlp(x_cat)
 
         x = self.l_decoder_norm(x)
 
         # predictor projection
         x = self.l_decoder_pred(x)
 
-        # print("x after transformer",x.shape)
-
         # remove cls token
         x = x[:, 1:, :]
-
-        # print("x w/o cls token",x.shape)
 
         ids_shuffle = torch.argsort(ids_restore, dim=1)
         ids_keep = ids_shuffle[:, :(T - 1)]
 
         x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
-
-        # print("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x final", x.shape)
-
-        # assert False, ("ids shuffle", ids_shuffle.shape, "ids keep", ids_keep.shape, "x init", x_init.shape, "x final", x.shape)
 
         assert x.shape == (B, T - 1, D)
         return x
