@@ -268,7 +268,6 @@ class MaskedAutoencoderViT(nn.Module):
             mask_tokens = cls_features.repeat(1, FT, 1)
         else:
             raise NotImplementedError(self.l_cls_input)
-        assert False, (cls_features.shape, mask_tokens.shape)
 
         x = torch.cat([cls_features, mask_tokens], dim=1)
         # use only the cls token form the input x
