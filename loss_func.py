@@ -20,6 +20,7 @@ class ClsPosLoss(nn.Module):
     def __init__(
             self,
             loss_type: str, out_dim: int,
+            norm_targets: bool,
             *,
             number_of_epochs,
             warmup_teacher_temp_epochs,
@@ -29,6 +30,7 @@ class ClsPosLoss(nn.Module):
     ):
         super().__init__()
         self.loss_type = loss_type
+        self.norm_targets = norm_targets
 
 
         self.register_buffer("center", torch.zeros(1, out_dim))
@@ -42,6 +44,11 @@ class ClsPosLoss(nn.Module):
     def forward(self, t_latent, p_latent, epoch: int):
         t_latent = t_latent.detach()
         assert t_latent.shape == p_latent.shape
+
+        if self.norm_targets:
+            mean = t_latent.mean(dim=-1, keepdim=True)
+            var = t_latent.var(dim=-1, keepdim=True)
+            t_latent = (t_latent - mean) / (var + 1.e-6) ** .5
 
         if self.loss_type == "mse":
             loss_latent = (p_latent - t_latent).pow(2).mean()

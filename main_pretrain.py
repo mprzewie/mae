@@ -117,6 +117,7 @@ def get_args_parser():
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
     parser.add_argument("--lpred_decoder_heads", type=int, default=16)
     parser.add_argument("--latent_cls_input", "-lci", choices=["cls", "pos"], default="cls")
+    parser.add_argument("--latent_loss_norm_targets", "-llnt", action="store_true", default=False)
 
     parser.add_argument('--val_interval', default=10, type=int)
     parser.add_argument('--save_interval', default=50, type=int)
@@ -240,6 +241,7 @@ def main(args):
         out_dim=model_without_ddp.embed_dim,
         warmup_teacher_temp_epochs=args.warmup_epochs,
         number_of_epochs=args.epochs,
+        norm_targets=args.latent_loss_norm_targets
     )
     cls_pos_loss.to(device)
 
