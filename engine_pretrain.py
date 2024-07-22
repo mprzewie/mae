@@ -133,12 +133,17 @@ def train_one_epoch(model: MaskedAutoencoderViT,
         loss_reg_value_reduce = misc.all_reduce_mean(loss_reg_value)
         loss_ce_value_reduce = misc.all_reduce_mean(loss_ce_value)
         loss_latent_value_reduce = misc.all_reduce_mean(loss_latent_value)
+        loss_ent_i_reduce = misc.all_reduce_mean(loss_ent_i_value)
+        loss_ent_b_reduce = misc.all_reduce_mean(loss_ent_b_value)
+        loss_entropy_reduce = misc.all_reduce_mean(loss_ent_value)
         train_acc_reduce = misc.all_reduce_mean(train_acc)
 
         losses = {
             "value": loss_value_reduce,
             "mae": loss_mae_value_reduce,
             "reg": loss_reg_value_reduce,
+            "ent_i": loss_ent_i_reduce,
+            "ent_b": loss_ent_b_reduce,
             "ce": loss_ce_value_reduce,
         }
         assert not any([math.isnan(l) for l in losses.values()]), losses
@@ -153,6 +158,9 @@ def train_one_epoch(model: MaskedAutoencoderViT,
             log_writer.add_scalar('train_loss_reg', loss_reg_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_loss_ce', loss_ce_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_loss_latent', loss_latent_value_reduce, epoch_1000x)
+            log_writer.add_scalar('train_loss_ent_i', loss_ent_i_reduce, epoch_1000x)
+            log_writer.add_scalar('train_loss_ent_b', loss_ent_b_reduce, epoch_1000x)
+            log_writer.add_scalar('train_loss_ent', loss_entropy_reduce, epoch_1000x)
             log_writer.add_scalar('train_acc', train_acc_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
             log_writer.add_scalar("epoch", epoch, epoch_1000x)
