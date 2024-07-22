@@ -120,6 +120,8 @@ def get_args_parser():
     parser.add_argument("--latent_cls_input", "-lci", choices=["cls", "pos"], default="cls")
     parser.add_argument("--latent_loss_norm_targets", "-llnt", action="store_true", default=False)
     parser.add_argument("--entropy_lambda", "-el", type=float, default=0)
+    parser.add_argument("--entropy_head_depth", "-ehd", type=int, default=0)
+
 
     parser.add_argument('--val_interval', default=10, type=int)
     parser.add_argument('--save_interval', default=50, type=int)
@@ -221,6 +223,7 @@ def main(args):
         latent_loss_detach_classifier=args.latent_loss_detach_cls,
         latent_cls_input=args.latent_cls_input,
         latent_decoder_embed_dim=args.lpred_decoder_embed_dim,
+        entropy_head_depth=args.entropy_head_depth,
         **size_patch_kwargs
     )
 
