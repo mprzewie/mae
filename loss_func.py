@@ -85,8 +85,8 @@ class ClsPosLoss(nn.Module):
 
 
 
-def entropy_loss(cls_features):
-    sft = torch.nn.functional.softmax(cls_features, dim=1)
+def entropy_loss(cls_features, epsilon: float=1e-6):
+    sft = torch.nn.functional.softmax(cls_features, dim=1) + epsilon
     individual_entropy = - (sft * sft.log()).sum(dim=1).mean()
     # minimize individual entropy (each sample should activate one output strongly)
     mca = sft.mean(dim=0)
