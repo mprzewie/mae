@@ -11,7 +11,7 @@
 
 import math
 import sys
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Union
 
 import numpy as np
 import torch
@@ -24,6 +24,7 @@ from tqdm import tqdm
 import util.misc as misc
 import util.lr_sched as lr_sched
 from models_mae import MaskedAutoencoderViT
+from models_vit import VisionTransformer
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
@@ -100,7 +101,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device):
+def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer], device):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -117,9 +118,9 @@ def evaluate(data_loader, model, device):
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model(images)
+            output = model.forward(images)
             if type(output) is tuple:
-                _, _, _, (_, output, _, _, _) = output
+                _, _, _, (_, output, _, _, _, _) = output
 
             loss = criterion(output, target)
 

@@ -21,7 +21,7 @@ import util.misc as misc
 import util.lr_sched as lr_sched
 
 
-from loss_func import uniformity_loss, ClsPosLoss
+from loss_func import uniformity_loss, ClsPosLoss, entropy_loss
 from models_mae import MaskedAutoencoderViT
 
 AMP_PRECISIONS = {
@@ -64,13 +64,16 @@ def train_one_epoch(model: MaskedAutoencoderViT,
                 enabled=args.amp != "none",
                 dtype=AMP_PRECISIONS[args.amp]
         ):
-            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples,
+            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred, eh_outputs) = model.forward(samples,
                                                                                                    mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
                 loss_reg = torch.zeros_like(loss_mae)
             else:
                 loss_reg = uniformity_loss(cls_feats)
+
+            loss_ent_ind, loss_ent_batch = entropy_loss(cls_features=eh_outputs)
+            loss_entropy = loss_ent_ind + loss_ent_batch
 
             target_latent = latent[:, 1:]
 
@@ -84,12 +87,21 @@ def train_one_epoch(model: MaskedAutoencoderViT,
             else:
                 loss_ce = torch.tensor(0.).to(device)
 
-        loss = loss_mae + (args.lamb * loss_reg) + (args.lpred_lambda * loss_latent) + loss_ce
+        loss = (
+                loss_mae +
+                (args.lamb * loss_reg) +
+                (args.lpred_lambda * loss_latent) +
+                (args.entropy_lambda * loss_entropy) +
+                loss_ce
+        )
 
         loss_mae_value = loss_mae.item()
         loss_reg_value = loss_reg.item()
         loss_ce_value = loss_ce.item()
         loss_latent_value = loss_latent.item()
+        loss_ent_i_value = loss_ent_ind.item()
+        loss_ent_b_value = loss_ent_batch.item()
+        loss_ent_value = loss_entropy.item()
         loss_value = loss.item()
         train_acc = (outputs.argmax(dim=1) == targets).float().mean()
 
@@ -107,6 +119,9 @@ def train_one_epoch(model: MaskedAutoencoderViT,
             loss_reg=loss_reg_value,
             loss_ce=loss_ce_value,
             loss_latent=loss_latent_value,
+            loss_ent_i=loss_ent_i_value,
+            loss_ent_b=loss_ent_b_value,
+            loss_ent_value=loss_ent_value,
             train_acc=train_acc
         )
 

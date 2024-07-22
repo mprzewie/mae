@@ -83,6 +83,17 @@ class ClsPosLoss(nn.Module):
         # ema update
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
 
+
+
+def entropy_loss(cls_features):
+    sft = torch.nn.functional.softmax(cls_features, dim=1)
+    individual_entropy = - (sft * sft.log()).sum(dim=1).mean()
+    # minimize individual entropy (each sample should activate one output strongly)
+    mca = sft.mean(dim=0)
+    batch_entropy = (mca * mca.log()).sum()
+    # *maximize* batch entropy (all outputs should be activated ~equally by examples in the batch)
+    return individual_entropy, batch_entropy
+
 class GatherLayer(torch.autograd.Function):
     """Gather tensors from all process, supporting backward propagation."""
 

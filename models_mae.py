@@ -35,7 +35,9 @@ class MaskedAutoencoderViT(nn.Module):
                  latent_decoder_embed_dim: Optional[int]=None,
                  latent_decoder_depth: int = 8, latent_decoder_heads: int = 16,
                  latent_loss_detach_classifier: bool = True,
-                 latent_cls_input: Literal["cls", "pos"] = "cls"
+                 latent_cls_input: Literal["cls", "pos"] = "cls",
+                 entropy_head_depth: int = 0,
+
         ):
         super().__init__()
 
@@ -96,6 +98,14 @@ class MaskedAutoencoderViT(nn.Module):
             self.l_decoder_mlp = nn.Sequential(*ldmlp)
         else:
             raise NotImplementedError(self.l_decoder_arch)
+        # --------------------------------------------------------------------------
+        eh = []
+        if entropy_head_depth > 0:
+            eh = [nn.Linear(embed_dim, embed_dim)]
+            for _ in range(entropy_head_depth - 1):
+                eh.extend([nn.ReLU(), nn.Linear(embed_dim, embed_dim)])
+        self.entropy_head = nn.Sequential(*eh)
+
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -344,7 +354,10 @@ class MaskedAutoencoderViT(nn.Module):
             cls_feats = cls_feats[:, 0]
         outputs = self.fc(cls_feats.detach())
 
-        return mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred)
+        eh_outputs = self.entropy_head(cls_feats)
+
+
+        return mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred, eh_outputs)
 
 
 def mae_vit_tiny_patch16_dec192d4b(img_size=224, patch_size=16, **kwargs):

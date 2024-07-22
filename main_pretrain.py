@@ -117,9 +117,9 @@ def get_args_parser():
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
     parser.add_argument("--lpred_decoder_heads", type=int, default=16)
     parser.add_argument("--lpred_decoder_embed_dim", "-lded", type=int, default=None)
-
     parser.add_argument("--latent_cls_input", "-lci", choices=["cls", "pos"], default="cls")
     parser.add_argument("--latent_loss_norm_targets", "-llnt", action="store_true", default=False)
+    parser.add_argument("--entropy_lambda", "-el", type=float, default=0)
 
     parser.add_argument('--val_interval', default=10, type=int)
     parser.add_argument('--save_interval', default=50, type=int)
