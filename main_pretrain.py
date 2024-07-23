@@ -222,7 +222,7 @@ def main(args):
         latent_loss_detach_classifier=args.latent_loss_detach_cls,
         latent_cls_input=args.latent_cls_input,
         latent_decoder_embed_dim=args.lpred_decoder_embed_dim,
-        latent_decoder_dropout_rate=args.lpred_decoder_dropout_rate
+        latent_decoder_dropout_rate=args.lpred_decoder_dropout_rate,
         **size_patch_kwargs
     )
 
