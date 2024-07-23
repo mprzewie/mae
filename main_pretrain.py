@@ -116,7 +116,8 @@ def get_args_parser():
     parser.add_argument("--lpred_decoder_arch", "-lda", choices=["vit", "mlp"], default="vit")
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
     parser.add_argument("--lpred_decoder_heads", type=int, default=16)
-    parser.add_argument("--lpred_decoder_embed_dim", "-lded", type=int, default=None)
+    parser.add_argument("--lpred_decoder_embed_dim", "-lded", type=int, default=None, required=False)
+    parser.add_argument("--lpred_decoder_dropout_rate", "-lddr", type=float, default=0)
 
     parser.add_argument("--latent_cls_input", "-lci", choices=["cls", "pos"], default="cls")
     parser.add_argument("--latent_loss_norm_targets", "-llnt", action="store_true", default=False)
@@ -221,6 +222,7 @@ def main(args):
         latent_loss_detach_classifier=args.latent_loss_detach_cls,
         latent_cls_input=args.latent_cls_input,
         latent_decoder_embed_dim=args.lpred_decoder_embed_dim,
+        latent_decoder_dropout_rate=args.lpred_decoder_dropout_rate
         **size_patch_kwargs
     )
 

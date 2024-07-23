@@ -35,7 +35,8 @@ class MaskedAutoencoderViT(nn.Module):
                  latent_decoder_embed_dim: Optional[int]=None,
                  latent_decoder_depth: int = 8, latent_decoder_heads: int = 16,
                  latent_loss_detach_classifier: bool = True,
-                 latent_cls_input: Literal["cls", "pos"] = "cls"
+                 latent_cls_input: Literal["cls", "pos"] = "cls",
+                 latent_decoder_dropout_rate: float = 0
         ):
         super().__init__()
 
@@ -92,7 +93,7 @@ class MaskedAutoencoderViT(nn.Module):
                 self.l_decoder_embed_dim
             )]
             for _ in range(latent_decoder_depth - 1):
-                ldmlp.extend([nn.ReLU(), nn.Linear(self.l_decoder_embed_dim, self.l_decoder_embed_dim)])
+                ldmlp.extend([nn.Dropout(latent_decoder_dropout_rate), nn.ReLU(), nn.Linear(self.l_decoder_embed_dim, self.l_decoder_embed_dim)])
             self.l_decoder_mlp = nn.Sequential(*ldmlp)
         else:
             raise NotImplementedError(self.l_decoder_arch)
