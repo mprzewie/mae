@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --mem-per-cpu=7G
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=8
 #SBATCH --ntasks-per-node=1
 
 
