@@ -214,7 +214,7 @@ def main(args):
         )
 
     # define the model
-    model = models_mae.__dict__[args.model](
+    model: models_mae.MaskedAutoencoderViT = models_mae.__dict__[args.model](
         norm_pix_loss=args.norm_pix_loss,
         latent_decoder_arch=args.lpred_decoder_arch,
         latent_decoder_depth=args.lpred_decoder_depth,

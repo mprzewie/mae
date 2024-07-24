@@ -215,7 +215,7 @@ def main(args):
             patch_size=args.input_size // 16
         )
 
-    model = models_vit.__dict__[args.model](
+    model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
         global_pool=False, #args.global_pool,
         n_last_layers=args.n_last_layers,
@@ -313,11 +313,6 @@ def main(args):
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)
 
-    # classifier = model.head
-
-
-
-
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
@@ -360,10 +355,7 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        # if args.output_dir:
-        #     misc.save_model(
-        #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-        #         loss_scaler=loss_scaler, epoch=epoch)
+
 
         test_stats = evaluate(dl_val, classifier, device)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
@@ -389,49 +381,25 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-    # nvidia_smi.nvmlShutdown()
 
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
         device, shuffle_subsets: int, return_features: str, tqdm_desc: str = None,
-        # shuffle_agg: str = "cls_mean"
 ):
     model.eval()
     with torch.no_grad():
         features = []
         labels = []
-        # for (data, target) in tqdm(loader,  desc=tqdm_desc):
         for (data, target) in tqdm(loader, desc=tqdm_desc):
-            # assert False, data.shape
-            z = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
+            z, attns = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
             
             # hack
             z = z.mean(dim=1).unsqueeze(1)
-            
 
             features.append(z.detach().cpu())
-            # assert False, target.shape
             labels.append(target.detach().cpu().short())
-            # break
-            # print(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2, z.shape, z.dtype, target.dtype)
-            ####
 
-
-            # handle = nvidia_smi.nvmlDeviceGetHandleByIndex(0)
-            # card id 0 hardcoded here, there is also a call to get all available card ids, so we could iterate
-
-            # info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
-            #
-            # print("Total memory:", info.total  / 1024 ** 2 )
-            # print("Free memory:", info.free  / 1024 ** 2)
-            # print("Used memory:", info.used  / 1024 ** 2 )
-
-
-
-            gc.collect()
-    #
-    # assert False
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
     return features, labels
