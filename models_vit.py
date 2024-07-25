@@ -177,6 +177,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         attentions = []
         for blk in self.blocks:
             x, attn = blk.forward(x, return_attention=True)
+            attn = attn[:, :, :1]
             attentions.append(attn)
 
             if self.block_reshuffling:
