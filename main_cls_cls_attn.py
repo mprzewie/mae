@@ -134,7 +134,7 @@ def get_args_parser():
 
 
 def main(args):
-    misc.init_distributed_mode(args)
+    # misc.init_distributed_mode(args)
     # args.aug_every = args.aug_every or args.epochs
 
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
@@ -180,7 +180,7 @@ def main(args):
 
     if (not args.distributed or (global_rank == 0)) and args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
-        misc.maybe_setup_wandb(args.output_dir, args=args, job_type="linprobe")
+        misc.maybe_setup_wandb(args.output_dir, args=args, job_type="cls_cls_attn")
 
         log_writer = SummaryWriter(log_dir=args.output_dir)
     else:
@@ -295,7 +295,7 @@ def main(args):
     cc_attns = cc_attns.mean(axis=(1, 2))
 
     for i, a in enumerate(cc_attns):
-        log_writer.add_scalar("eval_attention/cls_cls", a, global_step=i)
+        log_writer.add_scalar("test/cls_cls_attention", a, global_step=i)
 
 
     # for i, a in enumerate(cc_attns):
