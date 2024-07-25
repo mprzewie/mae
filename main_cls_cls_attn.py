@@ -227,9 +227,16 @@ def main(args):
         else:
             print("Interpreting", args.finetune, "as timm model")
             from timm.models.vision_transformer import _create_vision_transformer
-            model_args = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12)
 
-            checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_args).state_dict()
+            model_to_kwargs = {
+                "vit_tiny_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
+                "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
+                "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
+                "vit_huge_patch16": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
+            }
+
+            model_kwargs = model_to_kwargs[args.model]
+            checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_kwargs).state_dict()
 
 
         print("Load pre-trained checkpoint from: %s" % args.finetune)
