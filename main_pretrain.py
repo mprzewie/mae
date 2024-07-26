@@ -21,6 +21,8 @@ from pathlib import Path
 import torch
 import torch.backends.cudnn as cudnn
 import torchvision
+import wandb
+from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -38,7 +40,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import models_mae
 
 from engine_pretrain import train_one_epoch, AMP_PRECISIONS
-from engine_finetune import evaluate, calculate_effrank, draw_mae_predictions
+from engine_finetune import evaluate, calculate_effrank, draw_mae_predictions, calculate_cls_cls_attention
 
 
 def get_args_parser():
@@ -280,6 +282,7 @@ def main(args):
             print(f'Max accuracy: {max_accuracy:.2f}%')
             print(f"Effective rank: {effrank:.2f}")
             mae_pred = draw_mae_predictions(dataset_val, model_without_ddp, device)
+            cls_cls_attn_stats = calculate_cls_cls_attention(data_loader_val, model_without_ddp, device)
 
             if log_writer is not None:
                 log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
@@ -287,6 +290,18 @@ def main(args):
                 log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
                 log_writer.add_scalar('monitoring/effrank', effrank, epoch)
                 log_writer.add_image('monitoring/mae_image', (mae_pred + 1) / 2, global_step=epoch)
+
+                for b, cca in enumerate(cls_cls_attn_stats):
+                    log_writer.add_scalar(f"monitoring/cls_cls_attn_per_block/{b}", cca, epoch)
+
+                # log_writer.add_scalars()
+                if wandb.run is not None:
+                    f, ax = plt.subplots(1,1)
+                    ax.set_title(f"Cls_cls_attn @ {epoch}")
+                    ax.plot(list(range(len(cls_cls_attn_stats))), cls_cls_attn_stats)
+                    ax.set_ylim(0, 1.2)
+                    wandb.log({f"monitoring/cls_cls_attn_plot": f})
+
 
 
 

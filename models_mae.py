@@ -232,12 +232,17 @@ class MaskedAutoencoderViT(nn.Module):
 
         # apply Transformer blocks
         x_blocks = [x]
+        cls_cls_attns = []
         for blk in self.blocks:
             x, attn = blk(x, return_attention=True)
             x_blocks.append(x)
-        x = self.norm(x)
+            cls_cls_attns.append(attn[:, :, :1, :1])
 
-        return x, mask, ids_restore, (torch.stack(x_blocks), attn)
+        x = self.norm(x)
+        cls_cls_attns = torch.stack(cls_cls_attns, dim=1)
+        # batch, blocks, heads, 1, 1
+
+        return x, mask, ids_restore, (torch.stack(x_blocks), cls_cls_attns)
 
     def forward_decoder(self, x, ids_restore):
         # embed tokens
