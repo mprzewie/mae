@@ -326,7 +326,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
 
         if epoch % args.aug_every == 0:
-            X_train, Y_train = collect_features(
+            X_train, Y_train, _ = collect_features(
                 model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
                 return_features=args.cls_features
             )
@@ -339,7 +339,7 @@ def main(args):
                 drop_last=False,
             )
 
-            X_test, Y_test = collect_features(
+            X_test, Y_test, A_test = collect_features(
                 model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
                 return_features=args.cls_features
             )
@@ -363,8 +363,11 @@ def main(args):
             args=args
         )
 
+        test_stats = evaluate(dl_val, classifier, device, return_targets_and_preds=True)
 
-        test_stats = evaluate(dl_val, classifier, device)
+        test_targets = test_stats.pop("targets")
+        test_preds = test_stats.pop("preds")
+
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')
@@ -385,9 +388,21 @@ def main(args):
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
+    outputs = {
+        "targets": test_targets,
+        "preds": test_preds,
+        "attentions": A_test,
+    }
+    torch.save(outputs, Path(args.output_dir) / "outputs_linprobe_v2.pth")
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+
+    cc_attns = A_test.mean(dim=(0, 2))
+
+    for i, a in enumerate(cc_attns):
+        log_writer.add_scalar("test_v2/cls_cls_attention", a.item(), global_step=i)
 
 
 def collect_features(
@@ -398,18 +413,23 @@ def collect_features(
     with torch.no_grad():
         features = []
         labels = []
+        attns_list = []
         for (data, target) in tqdm(loader, desc=tqdm_desc):
             z, attns = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
-            
-            # hack
+            attns = torch.stack(attns)[:, :, :, 0, 0].permute(1, 0, 2)
+
             z = z.mean(dim=1).unsqueeze(1)
 
             features.append(z.detach().cpu())
-            labels.append(target.detach().cpu().short())
+            labels.append(target.detach().cpu().long())
+            attns_list.append(attns.detach().cpu())
+
 
     features = torch.cat(features, dim=0)
-    labels = torch.cat(labels, dim=0).long()
-    return features, labels
+    labels = torch.cat(labels, dim=0)
+    attns_list = torch.cat(attns_list, dim=0)
+
+    return features, labels, attns_list
 
 class AggHead(nn.Module):
     def __init__(self, mlp: nn.Linear, agg_method: str):
@@ -444,17 +464,6 @@ class AggHead(nn.Module):
 
         raise NotImplementedError(self.agg_method)
 
-
-
-def build_step(X, Y, classifier, optimizer, w, criterion_fn):
-    def step():
-        optimizer.zero_grad()
-        loss = criterion_fn(classifier(X), Y, reduction='sum')
-        for p in classifier.parameters():
-            loss = loss + p.pow(2).sum().mul(w)
-        loss.backward()
-        return loss
-    return step
 
 
 if __name__ == '__main__':
