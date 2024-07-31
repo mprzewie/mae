@@ -421,12 +421,12 @@ def collect_features(
             z = z.mean(dim=1).unsqueeze(1)
 
             features.append(z.detach().cpu())
-            labels.append(target.detach().cpu().long())
+            labels.append(target.detach().short().cpu())
             attns_list.append(attns.detach().cpu())
 
 
     features = torch.cat(features, dim=0)
-    labels = torch.cat(labels, dim=0)
+    labels = torch.cat(labels, dim=0).long()
     attns_list = torch.cat(attns_list, dim=0)
 
     return features, labels, attns_list
