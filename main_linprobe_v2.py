@@ -85,6 +85,8 @@ def get_args_parser():
     # * Finetuning params
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
+    parser.add_argument("--checkpoint_key", default="model", type=str)
+
     # parser.add_argument('--global_pool', action='store_true')
     parser.set_defaults(global_pool=False)
     # parser.add_argument('--cls_token', action='store_false', dest='global_pool',
@@ -229,7 +231,7 @@ def main(args):
     if args.finetune and not args.eval:
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
-            checkpoint_model = torch.load(args.finetune, map_location='cpu')["model"]
+            checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
         else:
             print("Interpreting", args.finetune, "as timm model")
             from timm.models.vision_transformer import _create_vision_transformer
