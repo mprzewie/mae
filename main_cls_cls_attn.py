@@ -292,9 +292,8 @@ def main(args):
         for (data, target) in tqdm(data_loader_val, desc="collecting features"):
             _, attns = model.forward_features(data.to(device))
 
-            attns = torch.stack(attns)
 
-            cls_cls_attn = attns[:, :, :, 0, 0].detach().cpu().numpy() # blocks, batch, heads
+            cls_cls_attn = attns[:, :, :, 0].detach().cpu().numpy() # blocks, batch, heads
             cls_cls_attns.append(cls_cls_attn)
 
             # assert False, [a.shape for a in attns]

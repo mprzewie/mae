@@ -357,6 +357,7 @@ def main(args):
         if args.distributed:
             dl_train.sampler.set_epoch(epoch)
         print(f"{epoch=}")
+
         train_stats = train_one_epoch(
             classifier, criterion, dl_train,
             optimizer, device, epoch, loss_scaler,
@@ -378,6 +379,9 @@ def main(args):
             log_writer.add_scalar('test_v2/test_acc1', test_stats['acc1'], epoch)
             log_writer.add_scalar('test_v2/test_acc5', test_stats['acc5'], epoch)
             log_writer.add_scalar('test_v2/test_loss', test_stats['loss'], epoch)
+            for k, v in train_stats.items():
+                if isinstance(v, float):
+                    log_writer.add_scalar(f"test_v2/train_{k}", v, epoch)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
@@ -401,11 +405,16 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
-    cc_attns = A_test.mean(dim=(0, 2))
+    mean_attn_stats = A_test.mean(dim=(0, 2))
+
+    cc_attns = mean_attn_stats[:, 0]
+    pos_self_attns = mean_attn_stats[:, 1]
 
     for i, a in enumerate(cc_attns):
         log_writer.add_scalar("test_v2/cls_cls_attention", a.item(), global_step=i)
 
+    for i, a in enumerate(pos_self_attns):
+        log_writer.add_scalar("test_v2/pos_self_attention", a.item(), global_step=i)
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
@@ -416,15 +425,19 @@ def collect_features(
         features = []
         labels = []
         attns_list = []
-        for (data, target) in tqdm(loader, desc=tqdm_desc):
+        for i, (data, target) in enumerate(tqdm(loader, desc=tqdm_desc)):
             z, attns = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
-            attns = torch.stack(attns)[:, :, :, 0, 0].permute(1, 0, 2)
+
+            attns = attns.permute(1, 0, 2, 3)
+            cls_cls_attns = attns[:, :, :, :1]
+            pos_self_attns = attns[:, :, :, 1:].mean(dim=3, keepdim=True)
+            attn_stats = torch.cat([cls_cls_attns, pos_self_attns], dim=3)
 
             z = z.mean(dim=1).unsqueeze(1)
 
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
-            attns_list.append(attns.detach().cpu())
+            attns_list.append(attn_stats.detach().cpu())
 
 
     features = torch.cat(features, dim=0)

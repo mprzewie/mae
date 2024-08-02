@@ -177,7 +177,11 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         attentions = []
         for blk in self.blocks:
             x, attn = blk.forward(x, return_attention=True)
-            attn = attn[:, :, :1, :1]
+
+            B, H, T, T = attn.shape
+            attn_range = torch.arange(T)
+            attn = attn[:, :, attn_range, attn_range]
+
             attentions.append(attn.detach().cpu())
 
             if self.block_reshuffling:
@@ -207,7 +211,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         else:
             raise NotImplementedError(return_features)
 
-
+        attentions = torch.stack(attentions)
         return ret, attentions
 
         # return x_cls, x_pos

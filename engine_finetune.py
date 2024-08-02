@@ -60,6 +60,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         with torch.cuda.amp.autocast():
             outputs = model(samples)
             loss = criterion(outputs, targets)
+            acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
+            metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
 
         loss_value = loss.item()
 
