@@ -219,7 +219,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
     def forward(self, x: torch.Tensor, return_features: str = "cls") -> torch.Tensor:
-        x = self.forward_features(x, return_features=return_features, shuffle_subsets=1)
+        x, attn = self.forward_features(x, return_features=return_features, shuffle_subsets=1)
         x = x.mean(dim=1)  # account for shuffle subsets which is essentially a no-op in this case
         x = self.head(x)
         return x

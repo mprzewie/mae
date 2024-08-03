@@ -23,20 +23,21 @@ from torch.utils.tensorboard import SummaryWriter
 
 import timm
 
-assert timm.__version__ == "0.3.2" # version check
+# assert timm.__version__ == "0.3.2" # version check
 from timm.models.layers import trunc_normal_
 from timm.data.mixup import Mixup
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 
 import util.lr_decay as lrd
 import util.misc as misc
-from util.datasets import build_dataset
+from util.datasets import build_dataset, build_dataset_v2
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_vit
 
 from engine_finetune import train_one_epoch, evaluate
+from main_linprobe_v2 import collect_features
 
 
 def get_args_parser():
@@ -112,9 +113,9 @@ def get_args_parser():
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
     parser.add_argument('--global_pool', action='store_true')
-    parser.set_defaults(global_pool=True)
-    parser.add_argument('--cls_token', action='store_false', dest='global_pool',
-                        help='Use class token instead of global pool for classification')
+
+    # parser.add_argument('--cls_token', action='store_false', dest='global_pool',
+    #                     help='Use class token instead of global pool for classification')
 
     # Dataset parameters
     parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
@@ -124,8 +125,7 @@ def get_args_parser():
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='./output_dir',
-                        help='path where to tensorboard log')
+
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
@@ -193,9 +193,11 @@ def main(args):
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    if global_rank == 0 and args.log_dir is not None and not args.eval:
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = SummaryWriter(log_dir=args.log_dir)
+    if global_rank == 0 and args.output_dir is not None and not args.eval:
+        os.makedirs(args.output_dir, exist_ok=True)
+        misc.maybe_setup_wandb(args.output_dir, args=args, job_type="finetune")
+
+        log_writer = SummaryWriter(log_dir=args.output_dir)
     else:
         log_writer = None
 
@@ -317,20 +319,44 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
+
+
         if args.output_dir:
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch)
+            misc.save_model(args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler, epoch="ft")
 
         test_stats = evaluate(data_loader_val, model, device)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
+        _, _, A_test = collect_features(model, data_loader_val, device, shuffle_subsets=1, return_features="cls")
+        mean_attn_stats = A_test.mean(dim=(0, 2))
+
+        cc_attns = mean_attn_stats[:, 0]
+        pos_self_attns = mean_attn_stats[:, 1]
+
+        # assert False, [t.shape for t in [cc_attns, pos_self_attns]]
         if log_writer is not None:
-            log_writer.add_scalar('perf/test_acc1', test_stats['acc1'], epoch)
-            log_writer.add_scalar('perf/test_acc5', test_stats['acc5'], epoch)
-            log_writer.add_scalar('perf/test_loss', test_stats['loss'], epoch)
+            log_writer.add_scalar('test_ft/test_acc1', test_stats['acc1'], epoch)
+            log_writer.add_scalar('test_ft/test_acc5', test_stats['acc5'], epoch)
+            log_writer.add_scalar('test_ft/test_loss', test_stats['loss'], epoch)
+            for k, v in train_stats.items():
+                if isinstance(v, float):
+                    log_writer.add_scalar(f"test_ft/train_{k}", v, epoch)
+
+            for b, cca in enumerate(cc_attns):
+                log_writer.add_scalar(f"monitoring_ft/cls_cls_attn_per_block/{b}", cca, epoch)
+            for b, psa in enumerate(pos_self_attns):
+                log_writer.add_scalar(f"monitoring_ft/pos_self_attn_per_block/{b}", cca, epoch)
+
+            if wandb.run is not None:
+                f, ax = plt.subplots(1, 1)
+                ax.set_title(f"Ft_ls_cls_attn @ {epoch}")
+                ax.plot(list(range(len(cc_attns))), cc_attns, label="cc_attn")
+                ax.plot(list(range(len(pos_self_attns))), pos_self_attns, label="pos_self_attn")
+                ax.set_ylim(0, 1.2)
+                wandb.log({f"monitoring_ft/attn_stats": f})
+
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         **{f'test_{k}': v for k, v in test_stats.items()},
