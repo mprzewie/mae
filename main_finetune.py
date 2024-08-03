@@ -112,6 +112,8 @@ def get_args_parser():
     # * Finetuning params
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
+    parser.add_argument("--checkpoint_key", default="model", type=str)
+
     parser.add_argument('--global_pool', action='store_true')
 
     # parser.add_argument('--cls_token', action='store_false', dest='global_pool',
@@ -233,10 +235,28 @@ def main(args):
     )
 
     if args.finetune and not args.eval:
-        checkpoint = torch.load(args.finetune, map_location='cpu')
+        if args.finetune and not args.eval:
+            if Path(args.finetune).exists():
+                print("Interpreting", args.finetune, "as path")
+                checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+            else:
+                print("Interpreting", args.finetune, "as timm model")
+                from timm.models.vision_transformer import _create_vision_transformer
+
+                model_to_kwargs = {
+                    "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
+                    "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
+                    "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
+                    "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
+                    "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
+                }
+
+                model_kwargs = model_to_kwargs[args.model]
+                checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True,
+                                                              **model_kwargs).state_dict()
 
         print("Load pre-trained checkpoint from: %s" % args.finetune)
-        checkpoint_model = checkpoint['model']
+        # checkpoint_model = checkpoint['model']
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
