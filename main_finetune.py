@@ -349,7 +349,7 @@ def main(args):
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
-        _, _, A_test = collect_features(model, data_loader_val, device, shuffle_subsets=1, return_features="cls")
+        _, _, A_test = collect_features(model_without_ddp, data_loader_val, device, shuffle_subsets=1, return_features="cls")
         mean_attn_stats = A_test.mean(dim=(0, 2))
 
         cc_attns = mean_attn_stats[:, 0]
