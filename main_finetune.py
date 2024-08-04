@@ -329,21 +329,26 @@ def main(args):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
-    for epoch in range(args.start_epoch, args.epochs):
+    for epoch in range(args.start_epoch, args.epochs+1):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
-        train_stats = train_one_epoch(
-            model, criterion, data_loader_train,
-            optimizer, device, epoch, loss_scaler,
-            args.clip_grad, mixup_fn,
-            log_writer=log_writer,
-            args=args
-        )
+
+        if epoch > 0:
+            train_stats = train_one_epoch(
+                model, criterion, data_loader_train,
+                optimizer, device, epoch, loss_scaler,
+                args.clip_grad, mixup_fn,
+                log_writer=log_writer,
+                args=args
+            )
+        else:
+            train_stats = dict()
+
+
         test_stats = evaluate(data_loader_val, model, device)
 
         if args.output_dir:
-            misc.save_model(args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler, epoch="ft",        test_stats = evaluate(data_loader_val, model, device)
-)
+            misc.save_model(args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler, epoch="ft", test_stats =test_stats)
 
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
