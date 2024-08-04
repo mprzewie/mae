@@ -39,6 +39,7 @@ import models_vit
 from engine_finetune import train_one_epoch, evaluate
 from main_linprobe_v2 import collect_features
 import wandb
+import matplotlib.pyplot as plt
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
