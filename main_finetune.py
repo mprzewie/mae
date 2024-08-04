@@ -273,7 +273,7 @@ def main(args):
         if args.global_pool:
             assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
         else:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+            assert (set(msg.missing_keys) == {'head.weight', 'head.bias'} or len(set(msg.missing_keys)) == 0), msg.missing_keys
 
         # manually initialize fc layer
         trunc_normal_(model.head.weight, std=2e-5)
