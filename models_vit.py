@@ -72,51 +72,49 @@ class Attention(nn.Module):
             attn = self.attn_drop(attn)
 
             s = time()
-            
-            
-            if self.cls_bias is not None:
-                cb = self.cls_bias #.to(attn.device)
-                t1 = time()
+            cb = self.cls_bias #.to(attn.device)
+            t1 = time()
 
-                attn[:, :, 0, 0] += cb
-                t2 = time()
-                # attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
-                attn = attn.clamp(0, 1)
-                t3 = time()
+            attn[:, :, 0, 0] += cb
+            t2 = time()
+            # attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
+            attn = attn.clamp(0, 1)
+            t3 = time()
 
-                target_non_cc_weight = 1 - attn[:, :, 0, 0]
-                t4 = time()
-                actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
-                t5 = time()
-                epsilon = 1e-6
-                mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
-                t6 = time()
+            target_non_cc_weight = 1 - attn[:, :, 0, 0]
+            t4 = time()
+            actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
+            t5 = time()
+            epsilon = 1e-6
+            mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
+            t6 = time()
 
-                attn[:, :, 0, 1:] *= mp.unsqueeze(2)
-                t7 = time()
-                attn = attn.clamp(0, 1)
-                t8 = time()
+            attn[:, :, 0, 1:] *= mp.unsqueeze(2)
+            t7 = time()
+            attn = attn.clamp(0, 1)
+            t8 = time()
 
-                # pprint({
-                #     "t1": t1 - s,
-                #     "t2": t2 - t1,
-                #     "t3": t3 - t2,
-                #     "t4": t4 - t3,
-                #     "t5": t5 - t4,
-                #     "t6": t6 - t5,
-                #     "t7": t7 - t6,
-                #     "t8": t8 - t7,
-                # })
-                # assert False
+            # pprint({
+            #     "t1": t1 - s,
+            #     "t2": t2 - t1,
+            #     "t3": t3 - t2,
+            #     "t4": t4 - t3,
+            #     "t5": t5 - t4,
+            #     "t6": t6 - t5,
+            #     "t7": t7 - t6,
+            #     "t8": t8 - t7,
+            # })
+            # assert False
 
             x = attn @ v
 
-        x = x.transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        sattn = time()
-        # print("attn total", sattn - s0)
-        return x, attn
+            x = x.transpose(1, 2).reshape(B, N, C)
+            x = self.proj(x)
+            x = self.proj_drop(x)
+            sattn = time()
+            # print("attn total", sattn - s0)
+            return x, attn
+
 
 
 

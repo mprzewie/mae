@@ -330,12 +330,12 @@ def main(args):
     max_accuracy = 0.0
 
     if args.cca_bias != "none":
-        _, _, A_train_before = collect_features(
+        _, _, A_train = collect_features(
             model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
             return_features=args.cls_features
         )
-        cca = A_train_before[:, :, :, 0].mean(dim=0)
-        ccs = A_train_before[:, :, :, 0].std(dim=0)
+        cca = A_train[:, :, :, 0].mean(dim=0)
+        ccs = A_train[:, :, :, 0].std(dim=0)
         cca_mean = cca.mean(dim=1)
 
         if args.cca_bias == "linear":
@@ -349,11 +349,11 @@ def main(args):
         for bi in range(n_blocks):
             model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi]
 
-        _, _, A_train_after = collect_features(
+        _, _, A_train = collect_features(
             model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
             return_features=args.cls_features
         )
-        cca2 = A_train_after[:, :, :, 0].mean(dim=0)
+        cca2 = A_train[:, :, :, 0].mean(dim=0)
         cca_mean2 = cca2.mean(dim=1)
 
         fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
