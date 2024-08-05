@@ -48,7 +48,7 @@ class Attention(nn.Module):
         # self.register_buffer("cls_bias", torch.zeros(1))
         # assert False, self.cls_bias
 
-        self.cls_bias = None #torch.zeros(num_heads) # TODO maybe a register
+        self.cls_bias = torch.zeros(num_heads).cuda() # TODO maybe a register
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, N, C = x.shape
@@ -69,7 +69,7 @@ class Attention(nn.Module):
             attn = self.attn_drop(attn)
 
             if self.cls_bias is not None:
-                cb = self.cls_bias.to(attn.device)
+                cb = self.cls_bias #.to(attn.device)
 
                 attn[:, :, 0, 0] += cb
                 attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
