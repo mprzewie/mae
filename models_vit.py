@@ -18,6 +18,8 @@ import torch.nn as nn
 import timm.models.vision_transformer
 import torch.nn.functional as F
 
+from time import time
+from pprint import pprint
 
 class Attention(nn.Module):
     fused_attn: Final[bool]
@@ -51,6 +53,7 @@ class Attention(nn.Module):
         self.cls_bias = torch.zeros(num_heads).cuda() # TODO maybe a register
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        s0 = time()
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
@@ -68,25 +71,51 @@ class Attention(nn.Module):
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
 
+            s = time()
+            
+            
             if self.cls_bias is not None:
                 cb = self.cls_bias #.to(attn.device)
+                t1 = time()
 
                 attn[:, :, 0, 0] += cb
-                attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
+                t2 = time()
+                # attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
+                attn = attn.clamp(0, 1)
+                t3 = time()
 
                 target_non_cc_weight = 1 - attn[:, :, 0, 0]
+                t4 = time()
                 actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
+                t5 = time()
                 epsilon = 1e-6
                 mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
+                t6 = time()
 
                 attn[:, :, 0, 1:] *= mp.unsqueeze(2)
+                t7 = time()
                 attn = attn.clamp(0, 1)
+                t8 = time()
+
+                # pprint({
+                #     "t1": t1 - s,
+                #     "t2": t2 - t1,
+                #     "t3": t3 - t2,
+                #     "t4": t4 - t3,
+                #     "t5": t5 - t4,
+                #     "t6": t6 - t5,
+                #     "t7": t7 - t6,
+                #     "t8": t8 - t7,
+                # })
+                # assert False
 
             x = attn @ v
 
         x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
+        sattn = time()
+        # print("attn total", sattn - s0)
         return x, attn
 
 
