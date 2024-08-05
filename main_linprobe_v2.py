@@ -15,6 +15,7 @@ import json
 from copy import deepcopy
 from typing import Type
 
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import time
@@ -24,6 +25,7 @@ import psutil
 import torch
 import torch.backends.cudnn as cudnn
 import torchvision
+import wandb
 from timm.utils import accuracy
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
@@ -86,6 +88,7 @@ def get_args_parser():
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
     parser.add_argument("--checkpoint_key", default="model", type=str)
+    parser.add_argument("--cca_bias", default="none", choices=["none", "linear"])
 
     # parser.add_argument('--global_pool', action='store_true')
     parser.set_defaults(global_pool=False)
@@ -325,6 +328,50 @@ def main(args):
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
+
+    if args.cca_bias != "none":
+        _, _, A_train_before = collect_features(
+            model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
+            return_features=args.cls_features
+        )
+        cca = A_train_before[:, :, :, 0].mean(dim=0)
+        ccs = A_train_before[:, :, :, 0].std(dim=0)
+        cca_mean = cca.mean(dim=1)
+
+        if args.cca_bias == "linear":
+            n_blocks = len(model_without_ddp.blocks)
+            target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
+            cca_biases = target_cca.unsqueeze(1) - cca
+
+        else:
+            raise NotImplementedError(args.cca_bias)
+
+        for bi in range(n_blocks):
+            model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi]
+
+        _, _, A_train_after = collect_features(
+            model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
+            return_features=args.cls_features
+        )
+        cca2 = A_train_after[:, :, :, 0].mean(dim=0)
+        cca_mean2 = cca2.mean(dim=1)
+
+        fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
+        for h in range(cca.shape[1]):
+            ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
+            ax[h].plot(cca_mean, color="red", label=f"mean cca before")
+            ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
+            ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
+            ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
+            ax[h].set_title(f"Head {h}")
+            ax[h].set_xlabel("VIT Block")
+            ax[h].set_ylim(-0.1, 1.2)
+            ax[0].legend(ncols=5)
+
+        if wandb.run is not None:
+            wandb.log({"monitoring/cca_bias": fig})
+
+
     for epoch in range(args.start_epoch, args.epochs):
 
         if epoch % args.aug_every == 0:

@@ -45,6 +45,10 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        # self.register_buffer("cls_bias", torch.zeros(1))
+        # assert False, self.cls_bias
+
+        self.cls_bias = None #torch.zeros(num_heads) # TODO maybe a register
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, N, C = x.shape
@@ -53,6 +57,7 @@ class Attention(nn.Module):
         q, k = self.q_norm(q), self.k_norm(k)
 
         if self.fused_attn:
+            assert False
             x = F.scaled_dot_product_attention(
                 q, k, v,
                 dropout_p=self.attn_drop.p if self.training else 0.,
@@ -62,6 +67,21 @@ class Attention(nn.Module):
             attn = q @ k.transpose(-2, -1)
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
+
+            if self.cls_bias is not None:
+                cb = self.cls_bias.to(attn.device)
+
+                attn[:, :, 0, 0] += cb
+                attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
+
+                target_non_cc_weight = 1 - attn[:, :, 0, 0]
+                actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
+                epsilon = 1e-6
+                mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
+
+                attn[:, :, 0, 1:] *= mp.unsqueeze(2)
+                attn = attn.clamp(0, 1)
+
             x = attn @ v
 
         x = x.transpose(1, 2).reshape(B, N, C)
