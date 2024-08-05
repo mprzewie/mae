@@ -71,28 +71,28 @@ class Attention(nn.Module):
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
 
-            s = time()
+            # s = time()
             cb = self.cls_bias #.to(attn.device)
-            t1 = time()
+            # t1 = time()
 
             attn[:, :, 0, 0] += cb
-            t2 = time()
+            # t2 = time()
             # attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
             attn = attn.clamp(0, 1)
-            t3 = time()
+            # t3 = time()
 
             target_non_cc_weight = 1 - attn[:, :, 0, 0]
-            t4 = time()
+            # t4 = time()
             actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
-            t5 = time()
+            # t5 = time()
             epsilon = 1e-6
             mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
-            t6 = time()
+            # t6 = time()
 
             attn[:, :, 0, 1:] *= mp.unsqueeze(2)
-            t7 = time()
+            # t7 = time()
             attn = attn.clamp(0, 1)
-            t8 = time()
+            # t8 = time()
 
             # pprint({
             #     "t1": t1 - s,
@@ -111,7 +111,7 @@ class Attention(nn.Module):
             x = x.transpose(1, 2).reshape(B, N, C)
             x = self.proj(x)
             x = self.proj_drop(x)
-            sattn = time()
+            # sattn = time()
             # print("attn total", sattn - s0)
             return x, attn
 
