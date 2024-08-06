@@ -88,7 +88,7 @@ def get_args_parser():
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
     parser.add_argument("--checkpoint_key", default="model", type=str)
-    parser.add_argument("--cca_bias", default="none", choices=["none", "linear"])
+    parser.add_argument("--cca_bias", default="none")
 
     # parser.add_argument('--global_pool', action='store_true')
     parser.set_defaults(global_pool=False)
@@ -338,10 +338,13 @@ def main(args):
         ccs = A_train[:, :, :, 0].std(dim=0)
         cca_mean = cca.mean(dim=1)
 
-        if args.cca_bias == "linear":
+        if args.cca_bias.startswith("linear"):
             n_blocks = len(model_without_ddp.blocks)
             target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
             cca_biases = target_cca.unsqueeze(1) - cca
+
+            if "clamp_ceil" in args.cca_bias:
+                cca_biases = cca_biases.clamp(max=0)
 
         else:
             raise NotImplementedError(args.cca_bias)
