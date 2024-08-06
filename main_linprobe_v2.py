@@ -347,7 +347,7 @@ def main(args):
             raise NotImplementedError(args.cca_bias)
 
         for bi in range(n_blocks):
-            model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi]
+            model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
 
         _, _, A_train = collect_features(
             model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
