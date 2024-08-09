@@ -336,9 +336,9 @@ def main(args):
 
     cca_mean = cca.mean(dim=1)
     n_blocks = len(model_without_ddp.blocks)
+    target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
 
     if args.cca_bias.startswith("linear"):
-        target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
         cca_biases = target_cca.unsqueeze(1) - cca
 
         if "clamp_ceil" in args.cca_bias:
@@ -349,8 +349,6 @@ def main(args):
 
     elif args.cca_bias != "none":
         raise NotImplementedError(args.cca_bias)
-
-
 
     _, _, A_train = collect_features(
         model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",

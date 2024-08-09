@@ -50,7 +50,7 @@ class Attention(nn.Module):
         # self.register_buffer("cls_bias", torch.zeros(1))
         # assert False, self.cls_bias
 
-        self.cls_bias = torch.zeros(num_heads).cuda() # TODO maybe a register
+        self.cls_bias = torch.zeros(num_heads).cuda() if torch.cuda.is_available() else torch.zeros(num_heads)# TODO maybe a register
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         s0 = time()
