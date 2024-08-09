@@ -350,10 +350,12 @@ def main(args):
     elif args.cca_bias != "none":
         raise NotImplementedError(args.cca_bias)
 
-    _, _, A_train = collect_features(
-        model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
-        return_features=args.cls_features
-    )
+    if args.cca_bias != "none":
+        _, _, A_train = collect_features(
+            model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
+            return_features=args.cls_features
+        )
+
     cca2 = A_train[:, :, :, 0].mean(dim=0)
     cca_mean2 = cca2.mean(dim=1)
 
