@@ -360,6 +360,8 @@ def main(args):
 
         cc_attns = mean_attn_stats[:, 0]
         pos_self_attns = mean_attn_stats[:, 1]
+        cls_pos_attns = mean_attn_stats[:, 2]  # should complement the cls cls attention
+        pos_cls_attns = mean_attn_stats[:, 3]
 
         # assert False, [t.shape for t in [cc_attns, pos_self_attns]]
         if log_writer is not None:
@@ -370,17 +372,28 @@ def main(args):
                 if isinstance(v, float):
                     log_writer.add_scalar(f"test_ft/train_{k}", v, epoch)
 
-            for b, cca in enumerate(cc_attns):
-                log_writer.add_scalar(f"monitoring_ft/cls_cls_attn_per_block/{b}", cca, epoch)
-            for b, psa in enumerate(pos_self_attns):
-                log_writer.add_scalar(f"monitoring_ft/pos_self_attn_per_block/{b}", cca, epoch)
+            for b, a in enumerate(cc_attns):
+                log_writer.add_scalar(f"monitoring_ft/cls_cls_attn_per_block/{b}", a, epoch)
+            for b, a in enumerate(pos_self_attns):
+                log_writer.add_scalar(f"monitoring_ft/pos_self_attn_per_block/{b}", a, epoch)
+
+            for b, a in enumerate(cls_pos_attns):
+                log_writer.add_scalar(f"monitoring_ft/cls_pos_attn_per_block/{b}", a, epoch)
+
+            for b, a in enumerate(pos_cls_attns):
+                log_writer.add_scalar(f"monitoring_ft/pos_cls_attn_per_block/{b}", a, epoch)
+
+
 
             if wandb.run is not None:
                 f, ax = plt.subplots(1, 1)
                 ax.set_title(f"Ft_ls_cls_attn @ {epoch}")
                 ax.plot(list(range(len(cc_attns))), cc_attns, label="cc_attn")
                 ax.plot(list(range(len(pos_self_attns))), pos_self_attns, label="pos_self_attn")
+                ax.plot(list(range(len(cls_pos_attns))), cls_pos_attns, label="cls_pos_attn")
+                ax.plot(list(range(len(pos_cls_attns))), pos_cls_attns, label="pos_cls_attn")
                 ax.set_ylim(0, 1.2)
+                ax.legend()
                 wandb.log({f"monitoring_ft/attn_stats": f})
 
 

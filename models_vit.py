@@ -82,32 +82,14 @@ class Attention(nn.Module):
             # t3 = time()
 
             target_non_cc_weight = 1 - attn[:, :, 0, 0]
-            # t4 = time()
             actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
-            # t5 = time()
             epsilon = 1e-6
             mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
-            # t6 = time()
 
             attn[:, :, 0, 1:] *= mp.unsqueeze(2)
-            # t7 = time()
             attn = attn.clamp(0, 1)
-            # t8 = time()
-
-            # pprint({
-            #     "t1": t1 - s,
-            #     "t2": t2 - t1,
-            #     "t3": t3 - t2,
-            #     "t4": t4 - t3,
-            #     "t5": t5 - t4,
-            #     "t6": t6 - t5,
-            #     "t7": t7 - t6,
-            #     "t8": t8 - t7,
-            # })
-            # assert False
 
             x = attn @ v
-
             x = x.transpose(1, 2).reshape(B, N, C)
             x = self.proj(x)
             x = self.proj_drop(x)
@@ -194,8 +176,10 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             self.embed_dim * n_last_layers, self.num_classes
         )
         self.block_reshuffling = block_reshuffling
+        assert not self.block_reshuffling
 
     def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls"):
+        assert shuffle_subsets == 1
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -204,22 +188,21 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        # assert False, x.shape
-        x_cls = x[:, :1]
-        x_pos = x[:, 1:]
-
-        assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
-        x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
-        B, L, D = x_pos.shape
-
-        noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
-        ids_shuffle = torch.argsort(noise, dim=1)
-        x_pos_shuffled = torch.gather(x_pos, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
-        x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
-
-        x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
-            B*shuffle_subsets, (L//shuffle_subsets)+1, D
-        )
+        # x_cls = x[:, :1]
+        # x_pos = x[:, 1:]
+        #
+        # assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
+        # x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
+        # B, L, D = x_pos.shape
+        #
+        # noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
+        # ids_shuffle = torch.argsort(noise, dim=1)
+        # x_pos_shuffled = torch.gather(x_pos, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
+        # x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
+        #
+        # x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
+        #     B*shuffle_subsets, (L//shuffle_subsets)+1, D
+        # )
 
         attentions = []
         for blk in self.blocks:
@@ -227,27 +210,40 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             B, H, T, T = attn.shape
             attn_range = torch.arange(T)
-            attn = attn[:, :, attn_range, attn_range]
+            attn_diag = attn[:, :, attn_range, attn_range] # attention of tokens w.r.t. themselves
+            cls_all_attn = attn[:, :, 0, ]  # attention of cls token to all tokens
+            all_cls_attn = attn[:, :, :, 0] # attention of all tokens to cls token
 
-            attentions.append(attn.detach().cpu())
+            # print(cls_all_attn.sum(dim=2))
 
-            if self.block_reshuffling:
-                x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L // shuffle_subsets) + 1, D)
-                x_cls = x_n_s_cl_d[:, :, :1]
-                x_pos = x_n_s_cl_d[:, :, 1:].reshape(B, L, D)
-                noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
-                ids_shuffle = torch.argsort(noise, dim=1)
-                x_pos_shuffled = torch.gather(x_pos, dim=1, index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
-                x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
-                x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
-                    B * shuffle_subsets, (L // shuffle_subsets) + 1, D
-                )
+            attn_stats = torch.stack([attn_diag, cls_all_attn, all_cls_attn])
 
-        x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L//shuffle_subsets)+1, D)
-        x_cls = x_n_s_cl_d[:, :, 0]
-        x_pos = x_n_s_cl_d[:, :, 1:].mean(dim=2)
+            attn_stats = attn_stats.unsqueeze(2)
+
+            # assert False, attn_stats.shape
+            attentions.append(attn_stats.detach().cpu())
+
+            # if self.block_reshuffling:
+            #     x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L // shuffle_subsets) + 1, D)
+            #     x_cls = x_n_s_cl_d[:, :, :1]
+            #     x_pos = x_n_s_cl_d[:, :, 1:].reshape(B, L, D)
+            #     noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
+            #     ids_shuffle = torch.argsort(noise, dim=1)
+            #     x_pos_shuffled = torch.gather(x_pos, dim=1, index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
+            #     x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
+            #     x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
+            #         B * shuffle_subsets, (L // shuffle_subsets) + 1, D
+            #     )
+
+        # x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L//shuffle_subsets)+1, D)
+        # x_cls = x_n_s_cl_d[:, :, 0]
+        # x_pos = x_n_s_cl_d[:, :, 1:].mean(dim=2)
 
         # ret = []
+
+        x_cls = x[:, 0]
+
+        x_pos = x[:, 1:].mean(dim=1)
 
         if return_features == "cls":
             ret = x_cls
@@ -258,7 +254,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         else:
             raise NotImplementedError(return_features)
 
-        attentions = torch.stack(attentions)
+        attentions = torch.cat(attentions, dim=2) # kind, batch, blocks, heads, tokens
         return ret, attentions
 
         # return x_cls, x_pos
@@ -267,7 +263,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
     def forward(self, x: torch.Tensor, return_features: str = "cls") -> torch.Tensor:
         x, attn = self.forward_features(x, return_features=return_features, shuffle_subsets=1)
-        x = x.mean(dim=1)  # account for shuffle subsets which is essentially a no-op in this case
+        # x = x.mean(dim=1)  # account for shuffle subsets which is essentially a no-op in this case
         x = self.head(x)
         return x
 

@@ -220,6 +220,13 @@ def main(args):
             patch_size=args.input_size // 16
         )
 
+    model_to_kwargs = {
+        "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
+        "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
+        "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
+        "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
+        "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
+    }
     model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
         global_pool=False, #args.global_pool,
@@ -239,13 +246,6 @@ def main(args):
             print("Interpreting", args.finetune, "as timm model")
             from timm.models.vision_transformer import _create_vision_transformer
 
-            model_to_kwargs = {
-                "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
-                "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
-                "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
-                "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
-                "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
-            }
 
             model_kwargs = model_to_kwargs[args.model]
             checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_kwargs).state_dict()
@@ -325,55 +325,56 @@ def main(args):
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)
 
+
+    _, _, A_train = collect_features(
+        model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
+        return_features=args.cls_features
+    )
+
+    cca = A_train[:, :, :, 0].mean(dim=0)
+    ccs = A_train[:, :, :, 0].std(dim=0)
+
+    cca_mean = cca.mean(dim=1)
+
+    if args.cca_bias.startswith("linear"):
+        n_blocks = len(model_without_ddp.blocks)
+        target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
+        cca_biases = target_cca.unsqueeze(1) - cca
+
+        if "clamp_ceil" in args.cca_bias:
+            cca_biases = cca_biases.clamp(max=0)
+
+    elif args.cca_bias != "none":
+        raise NotImplementedError(args.cca_bias)
+
+    for bi in range(n_blocks):
+        model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
+
+    _, _, A_train = collect_features(
+        model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
+        return_features=args.cls_features
+    )
+    cca2 = A_train[:, :, :, 0].mean(dim=0)
+    cca_mean2 = cca2.mean(dim=1)
+
+    fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
+    for h in range(cca.shape[1]):
+        ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
+        ax[h].plot(cca_mean, color="red", label=f"mean cca before")
+        ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
+        ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
+        ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
+        ax[h].set_title(f"Head {h}")
+        ax[h].set_xlabel("VIT Block")
+        ax[h].set_ylim(-0.1, 1.2)
+        ax[0].legend(ncols=5)
+
+    if wandb.run is not None:
+        wandb.log({"monitoring/cca_bias": fig})
+
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
-
-    if args.cca_bias != "none":
-        _, _, A_train = collect_features(
-            model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
-            return_features=args.cls_features
-        )
-        cca = A_train[:, :, :, 0].mean(dim=0)
-        ccs = A_train[:, :, :, 0].std(dim=0)
-        cca_mean = cca.mean(dim=1)
-
-        if args.cca_bias.startswith("linear"):
-            n_blocks = len(model_without_ddp.blocks)
-            target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
-            cca_biases = target_cca.unsqueeze(1) - cca
-
-            if "clamp_ceil" in args.cca_bias:
-                cca_biases = cca_biases.clamp(max=0)
-
-        else:
-            raise NotImplementedError(args.cca_bias)
-
-        for bi in range(n_blocks):
-            model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
-
-        _, _, A_train = collect_features(
-            model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
-            return_features=args.cls_features
-        )
-        cca2 = A_train[:, :, :, 0].mean(dim=0)
-        cca_mean2 = cca2.mean(dim=1)
-
-        fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
-        for h in range(cca.shape[1]):
-            ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
-            ax[h].plot(cca_mean, color="red", label=f"mean cca before")
-            ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
-            ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
-            ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
-            ax[h].set_title(f"Head {h}")
-            ax[h].set_xlabel("VIT Block")
-            ax[h].set_ylim(-0.1, 1.2)
-            ax[0].legend(ncols=5)
-
-        if wandb.run is not None:
-            wandb.log({"monitoring/cca_bias": fig})
-
 
     for epoch in range(args.start_epoch, args.epochs):
 
@@ -449,7 +450,7 @@ def main(args):
         "preds": test_preds,
         "attentions": A_test,
     }
-    torch.save(outputs, Path(args.output_dir) / "outputs_linprobe_v2.pth")
+    torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_v2:{args.cca_bias}.pth")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -459,12 +460,21 @@ def main(args):
 
     cc_attns = mean_attn_stats[:, 0]
     pos_self_attns = mean_attn_stats[:, 1]
+    cls_pos_attns = mean_attn_stats[:, 2] # should complement the cls cls attention
+    pos_cls_attns = mean_attn_stats[:, 3]
+
 
     for i, a in enumerate(cc_attns):
         log_writer.add_scalar("test_v2/cls_cls_attention", a.item(), global_step=i)
 
     for i, a in enumerate(pos_self_attns):
         log_writer.add_scalar("test_v2/pos_self_attention", a.item(), global_step=i)
+
+    for i, a in enumerate(cls_pos_attns):
+        log_writer.add_scalar("test_v2/cls_pos_attention", a.item(), global_step=i)
+
+    for i, a in enumerate(pos_cls_attns):
+        log_writer.add_scalar("test_v2/pos_cls_attention", a.item(), global_step=i)
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
@@ -478,17 +488,22 @@ def collect_features(
         for i, (data, target) in enumerate(tqdm(loader, desc=tqdm_desc)):
             z, attns = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
 
-            attns = attns.permute(1, 0, 2, 3)
-            cls_cls_attns = attns[:, :, :, :1]
-            pos_self_attns = attns[:, :, :, 1:].mean(dim=3, keepdim=True)
-            attn_stats = torch.cat([cls_cls_attns, pos_self_attns], dim=3)
+            cls_cls_attns = attns[0, :, :, :, :1]
+            pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)
+            cls_pos_attns = attns[1, :, :, :, 1:].mean(dim=3, keepdim=True)
+            pos_cls_attns = attns[2, :, :, :, 1:].mean(dim=3, keepdim=True)
 
-            z = z.mean(dim=1).unsqueeze(1)
+
+            attn_stats = torch.cat([cls_cls_attns, pos_self_attns, cls_pos_attns, pos_cls_attns], dim=3)
+
 
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
             attns_list.append(attn_stats.detach().cpu())
 
+            # debugging only!
+            # if i > 2:
+            #     break
 
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
