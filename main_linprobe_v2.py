@@ -519,26 +519,26 @@ class AggHead(nn.Module):
         self.agg_method = agg_method
 
     def forward(self, X):
-        B, S, D = X.shape
+        B, D = X.shape
 
         # print(X.shape)
         if self.agg_method == "rep":
-            X = X.mean(dim = 1)
+            # X = X.mean(dim = 1)
             Z = self.mlp(self.bn(X))
             return Z
 
         elif self.agg_method == "log":
-            X = X.reshape(B*S, D)
+            # X = X.reshape(B*S, D)
             # assert False, X.shape
             Z = self.mlp(self.bn(X))
             # assert False, Z.shape
-            Z = Z.reshape(B, S, Z.shape[-1])
-            Z = Z.mean(dim=1)
+            # Z = Z.reshape(B, S, Z.shape[-1])
+            # Z = Z.mean(dim=1)
             # assert False, Z.shape
             return Z
 
         if self.agg_method == "t1":
-            X = X[:, 0]  # take the first of the shuffled representations
+            # X = X[:, 0]  # take the first of the shuffled representations
             Z = self.mlp(self.bn(X))
             return Z
 
