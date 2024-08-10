@@ -50,7 +50,7 @@ class Attention(nn.Module):
         # self.register_buffer("cls_bias", torch.zeros(1))
         # assert False, self.cls_bias
 
-        self.cls_bias = torch.zeros(num_heads).cuda() if torch.cuda.is_available() else torch.zeros(num_heads)# TODO maybe a register
+        self.cls_bias = None #torch.zeros(num_heads).cuda() if torch.cuda.is_available() else torch.zeros(num_heads)# TODO maybe a register
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         s0 = time()
@@ -72,22 +72,23 @@ class Attention(nn.Module):
             attn = self.attn_drop(attn)
 
             # s = time()
-            cb = self.cls_bias #.to(attn.device)
-            # t1 = time()
+            if self.cls_bias is not None:
+                cb = self.cls_bias #.to(attn.device)
+                # t1 = time()
 
-            attn[:, :, 0, 0] += cb
-            # t2 = time()
-            # attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
-            attn = attn.clamp(0, 1)
-            # t3 = time()
+                attn[:, :, 0, 0] += cb
+                # t2 = time()
+                # attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
+                attn = attn.clamp(0, 1)
+                # t3 = time()
 
-            target_non_cc_weight = 1 - attn[:, :, 0, 0]
-            actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
-            epsilon = 1e-6
-            mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
+                target_non_cc_weight = 1 - attn[:, :, 0, 0]
+                actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
+                epsilon = 1e-6
+                mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
 
-            attn[:, :, 0, 1:] *= mp.unsqueeze(2)
-            attn = attn.clamp(0, 1)
+                attn[:, :, 0, 1:] *= mp.unsqueeze(2)
+                attn = attn.clamp(0, 1)
 
             x = attn @ v
             x = x.transpose(1, 2).reshape(B, N, C)
