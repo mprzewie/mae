@@ -533,8 +533,8 @@ def collect_features(
 
 
             # debugging only!
-            if i > 2:
-                break
+            # if i > 2:
+            #     break
 
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
