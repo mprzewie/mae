@@ -362,6 +362,8 @@ def main(args):
         pos_self_attns = mean_attn_stats[:, 1]
         cls_pos_attns = mean_attn_stats[:, 2]  # should complement the cls cls attention
         pos_cls_attns = mean_attn_stats[:, 3]
+        cls_pos_entropy = mean_attn_stats[:, 4]
+        pos_pos_entropy = mean_attn_stats[:, 5]
 
         # assert False, [t.shape for t in [cc_attns, pos_self_attns]]
         if log_writer is not None:
@@ -383,6 +385,11 @@ def main(args):
             for b, a in enumerate(pos_cls_attns):
                 log_writer.add_scalar(f"monitoring_ft/pos_cls_attn_per_block/{b}", a, epoch)
 
+            for b, a in enumerate(cls_pos_entropy):
+                log_writer.add_scalar(f"monitoring_ft/cls_pos_entropy_per_block/{b}", a.item(), epoch)
+
+            for b, a in enumerate(pos_pos_entropy):
+                log_writer.add_scalar(f"monitoring_ft/pos_pos_entropy_per_block/{b}", a.item(), epoch)
 
 
             if wandb.run is not None:
@@ -395,6 +402,13 @@ def main(args):
                 ax.set_ylim(0, 1.2)
                 ax.legend()
                 wandb.log({f"monitoring_ft/attn_stats": f})
+
+                f, ax = plt.subplots(1, 1)
+                ax.plot(list(range(len(cls_pos_entropy))), cls_pos_entropy, label="cls_pos_entropy")
+                ax.plot(list(range(len(pos_pos_entropy))), pos_pos_entropy, label="pos_pos_entropy")
+                ax.legend()
+                wandb.log({f"monitoring_ft/entropy_stats": f})
+
 
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},

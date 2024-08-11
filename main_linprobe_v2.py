@@ -464,6 +464,8 @@ def main(args):
     pos_self_attns = mean_attn_stats[:, 1]
     cls_pos_attns = mean_attn_stats[:, 2] # should complement the cls cls attention
     pos_cls_attns = mean_attn_stats[:, 3]
+    cls_pos_entropy = mean_attn_stats[:, 4]
+    pos_pos_entropy = mean_attn_stats[:, 5]
 
 
     for i, a in enumerate(cc_attns):
@@ -477,6 +479,12 @@ def main(args):
 
     for i, a in enumerate(pos_cls_attns):
         log_writer.add_scalar("test_v2/pos_cls_attention", a.item(), global_step=i)
+
+    for i, a in enumerate(cls_pos_entropy):
+        log_writer.add_scalar("test_v2/cls_pos_entropy", a.item(), global_step=i)
+
+    for i, a in enumerate(pos_pos_entropy):
+        log_writer.add_scalar("test_v2/pos_pos_entropy", a.item(), global_step=i)
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
@@ -495,8 +503,10 @@ def collect_features(
             cls_pos_attns = attns[1, :, :, :, 1:].mean(dim=3, keepdim=True)
             pos_cls_attns = attns[2, :, :, :, 1:].mean(dim=3, keepdim=True)
 
+            cls_pos_entropy = attns[3, :, :, :, :1]
+            pos_pos_entropy = attns[3, :, :, :, 1:].mean(dim=3, keepdim=True)
 
-            attn_stats = torch.cat([cls_cls_attns, pos_self_attns, cls_pos_attns, pos_cls_attns], dim=3)
+            attn_stats = torch.cat([cls_cls_attns, pos_self_attns, cls_pos_attns, pos_cls_attns, cls_pos_entropy, pos_pos_entropy], dim=3)
 
 
             features.append(z.detach().cpu())
