@@ -468,23 +468,18 @@ def main(args):
     pos_pos_entropy = mean_attn_stats[:, 5]
 
 
-    for i, a in enumerate(cc_attns):
-        log_writer.add_scalar("test_v2/cls_cls_attention", a.item(), global_step=i)
+    if wandb.run is not None:
+        for b in range(len(cc_attns)):
+            wandb.log({
+                "test_v2/cls_cls_attention": cc_attns[b],
+                "test_v2/pos_self_attention": pos_self_attns[b],
+                "test_v2/cls_pos_attention": cls_pos_attns[b],
+                "test_v2/pos_cls_attention": pos_cls_attns[b],
+                "test_v2/cls_pos_entropy": cls_pos_entropy[b],
+                "test_v2/pos_pos_entropy": pos_pos_entropy[b],
+                "test_v2/vit_block": b,
+            })
 
-    for i, a in enumerate(pos_self_attns):
-        log_writer.add_scalar("test_v2/pos_self_attention", a.item(), global_step=i)
-
-    for i, a in enumerate(cls_pos_attns):
-        log_writer.add_scalar("test_v2/cls_pos_attention", a.item(), global_step=i)
-
-    for i, a in enumerate(pos_cls_attns):
-        log_writer.add_scalar("test_v2/pos_cls_attention", a.item(), global_step=i)
-
-    for i, a in enumerate(cls_pos_entropy):
-        log_writer.add_scalar("test_v2/cls_pos_entropy", a.item(), global_step=i)
-
-    for i, a in enumerate(pos_pos_entropy):
-        log_writer.add_scalar("test_v2/pos_pos_entropy", a.item(), global_step=i)
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
