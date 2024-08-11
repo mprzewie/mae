@@ -290,7 +290,7 @@ def main(args):
     cls_cls_attns = []
     with torch.no_grad():
         for (data, target) in tqdm(data_loader_val, desc="collecting features"):
-            _, attns = model.forward_features(data.to(device))
+            _, attns, _ = model.forward_features(data.to(device))
 
 
             cls_cls_attn = attns[:, :, :, 0].detach().cpu().numpy() # blocks, batch, heads

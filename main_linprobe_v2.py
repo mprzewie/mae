@@ -326,7 +326,7 @@ def main(args):
         exit(0)
 
 
-    _, _, A_train = collect_features(
+    _, _, A_train, _ = collect_features(
         model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
         return_features=args.cls_features
     )
@@ -351,7 +351,7 @@ def main(args):
         raise NotImplementedError(args.cca_bias)
 
     if args.cca_bias != "none":
-        _, _, A_train = collect_features(
+        _, _, A_train, _ = collect_features(
             model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
             return_features=args.cls_features
         )
@@ -381,7 +381,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
 
         if epoch % args.aug_every == 0:
-            X_train, Y_train, _ = collect_features(
+            X_train, Y_train, _, _ = collect_features(
                 model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
                 return_features=args.cls_features
             )
@@ -394,7 +394,7 @@ def main(args):
                 drop_last=False,
             )
 
-            X_test, Y_test, A_test = collect_features(
+            X_test, Y_test, A_test, M_test = collect_features(
                 model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
                 return_features=args.cls_features
             )
@@ -428,13 +428,14 @@ def main(args):
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
+        lin_pf = f"test_linear_{args.cls_features}"
         if log_writer is not None:
-            log_writer.add_scalar('test_v2/test_acc1', test_stats['acc1'], epoch)
-            log_writer.add_scalar('test_v2/test_acc5', test_stats['acc5'], epoch)
-            log_writer.add_scalar('test_v2/test_loss', test_stats['loss'], epoch)
+            log_writer.add_scalar(f'{lin_pf}/test_acc1', test_stats['acc1'], epoch)
+            log_writer.add_scalar(f'{lin_pf}/test_acc5', test_stats['acc5'], epoch)
+            log_writer.add_scalar(f'{lin_pf}/test_loss', test_stats['loss'], epoch)
             for k, v in train_stats.items():
                 if isinstance(v, float):
-                    log_writer.add_scalar(f"test_v2/train_{k}", v, epoch)
+                    log_writer.add_scalar(f"{lin_pf}/train_{k}", v, epoch)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
@@ -451,14 +452,19 @@ def main(args):
         "targets": test_targets,
         "preds": test_preds,
         "attentions": A_test,
+        "magnitudes": M_test,
     }
-    torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_v2:{args.cca_bias}.pth")
+    torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
     mean_attn_stats = A_test.mean(dim=(0, 2))
+    mean_magn_stats = M_test.mean(dim=0)
+
+    assert False, [t.shape for t in [A_test,  mean_attn_stats, mean_magn_stats]]
+
 
     cc_attns = mean_attn_stats[:, 0]
     pos_self_attns = mean_attn_stats[:, 1]
@@ -466,18 +472,23 @@ def main(args):
     pos_cls_attns = mean_attn_stats[:, 3]
     cls_pos_entropy = mean_attn_stats[:, 4]
     pos_pos_entropy = mean_attn_stats[:, 5]
+    cls_magnitude = mean_magn_stats[:, 0]
+    pos_magnitude = mean_magn_stats[:, 1]
 
 
+    stats_pf = "test_attn"
     if wandb.run is not None:
         for b in range(len(cc_attns)):
             wandb.log({
-                "test_v2/cls_cls_attention": cc_attns[b],
-                "test_v2/pos_self_attention": pos_self_attns[b],
-                "test_v2/cls_pos_attention": cls_pos_attns[b],
-                "test_v2/pos_cls_attention": pos_cls_attns[b],
-                "test_v2/cls_pos_entropy": cls_pos_entropy[b],
-                "test_v2/pos_pos_entropy": pos_pos_entropy[b],
-                "test_v2/vit_block": b,
+                f"{stats_pf}/cls_cls_attention": cc_attns[b],
+                f"{stats_pf}/pos_self_attention": pos_self_attns[b],
+                f"{stats_pf}/cls_pos_attention": cls_pos_attns[b],
+                f"{stats_pf}/pos_cls_attention": pos_cls_attns[b],
+                f"{stats_pf}/cls_pos_entropy": cls_pos_entropy[b],
+                f"{stats_pf}/pos_pos_entropy": pos_pos_entropy[b],
+                f"{stats_pf}/cls_magnitude": cls_magnitude[b],
+                f"{stats_pf}/pos_magnitude": pos_magnitude[b],
+                f"{stats_pf}/vit_block": b,
             })
 
 
@@ -490,8 +501,11 @@ def collect_features(
         features = []
         labels = []
         attns_list = []
+        magn_list = []
+
+
         for i, (data, target) in enumerate(tqdm(loader, desc=tqdm_desc)):
-            z, attns = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
+            z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
 
             cls_cls_attns = attns[0, :, :, :, :1]
             pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)
@@ -503,20 +517,31 @@ def collect_features(
 
             attn_stats = torch.cat([cls_cls_attns, pos_self_attns, cls_pos_attns, pos_cls_attns, cls_pos_entropy, pos_pos_entropy], dim=3)
 
+            magn_residual = magnitudes[0]
+            magn_attended = magnitudes[1]
+            magn_stats = magn_attended / (magn_residual + 1e-6)
+            cls_magn_stats = magn_stats[:, :, :1]
+            pos_magn_stats = magn_stats[:, :, 1:].mean(dim=2, keepdim=True)
+
+            magn_stats = torch.cat([cls_magn_stats, pos_magn_stats], dim=2)
+
 
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
             attns_list.append(attn_stats.detach().cpu())
+            magn_list.append(magn_stats.detach().cpu())
+
 
             # debugging only!
-            # if i > 2:
-            #     break
+            if i > 2:
+                break
 
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
     attns_list = torch.cat(attns_list, dim=0)
+    magns_list = torch.cat(magn_list, dim=0)
 
-    return features, labels, attns_list
+    return features, labels, attns_list, magns_list
 
 class AggHead(nn.Module):
     def __init__(self, mlp: nn.Linear, agg_method: str):

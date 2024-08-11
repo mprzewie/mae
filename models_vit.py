@@ -143,11 +143,18 @@ class Block(nn.Module):
 
     def forward(self, x: torch.Tensor, return_attention=False) -> torch.Tensor:
         y, attention = self.attn(self.norm1(x))
+
+        x_norm = torch.linalg.vector_norm(x, dim=2)
+        y_norm = torch.linalg.vector_norm(y, dim=2)
+
+        magnitudes = torch.stack((x_norm, y_norm), dim=0)
+
+
         x = x + self.drop_path1(self.ls1(y))
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
 
         if return_attention:
-            return x, attention
+            return x, attention, magnitudes
 
         return x
 
@@ -206,8 +213,9 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         # )
 
         attentions = []
+        magnitudes = []
         for blk in self.blocks:
-            x, attn = blk.forward(x, return_attention=True)
+            x, attn, magn = blk.forward(x, return_attention=True)
 
             B, H, T, T = attn.shape
             attn_range = torch.arange(T)
@@ -227,8 +235,11 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             attn_stats = attn_stats.unsqueeze(2)
 
+            # assert False, [t.shape for t in [attn_stats, magn]]
+
             # assert False, attn_stats.shape
-            attentions.append(attn_stats.detach().cpu())
+            attentions.append(attn_stats.detach())
+            magnitudes.append(magn.unsqueeze(2).detach())
 
             # if self.block_reshuffling:
             #     x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L // shuffle_subsets) + 1, D)
@@ -262,14 +273,16 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             raise NotImplementedError(return_features)
 
         attentions = torch.cat(attentions, dim=2) # kind, batch, blocks, heads, tokens
-        return ret, attentions
+        magnitudes = torch.cat(magnitudes, dim=2) # kind, batch, blocks, tokens
+
+        return ret, attentions, magnitudes
 
         # return x_cls, x_pos
 
 
 
     def forward(self, x: torch.Tensor, return_features: str = "cls") -> torch.Tensor:
-        x, attn = self.forward_features(x, return_features=return_features, shuffle_subsets=1)
+        x, attn, magnitudes = self.forward_features(x, return_features=return_features, shuffle_subsets=1)
         # x = x.mean(dim=1)  # account for shuffle subsets which is essentially a no-op in this case
         x = self.head(x)
         return x

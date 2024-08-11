@@ -355,8 +355,9 @@ def main(args):
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
-        _, _, A_test = collect_features(model_without_ddp, data_loader_val, device, shuffle_subsets=1, return_features="cls")
+        _, _, A_test, M_test = collect_features(model_without_ddp, data_loader_val, device, shuffle_subsets=1, return_features="cls")
         mean_attn_stats = A_test.mean(dim=(0, 2))
+        mean_magn_stats = M_test.mean(dim=0)
 
         cc_attns = mean_attn_stats[:, 0]
         pos_self_attns = mean_attn_stats[:, 1]
@@ -364,6 +365,8 @@ def main(args):
         pos_cls_attns = mean_attn_stats[:, 3]
         cls_pos_entropy = mean_attn_stats[:, 4]
         pos_pos_entropy = mean_attn_stats[:, 5]
+        cls_magnitude = mean_magn_stats[:, 0]
+        pos_magnitude = mean_magn_stats[:, 1]
 
         # assert False, [t.shape for t in [cc_attns, pos_self_attns]]
         if log_writer is not None:
@@ -391,6 +394,12 @@ def main(args):
             for b, a in enumerate(pos_pos_entropy):
                 log_writer.add_scalar(f"monitoring_ft/pos_pos_entropy_per_block/{b}", a.item(), epoch)
 
+            for b, a in enumerate(cls_magnitude):
+                log_writer.add_scalar(f"monitoring_ft/cls_magnitude_per_block/{b}", a.item(), epoch)
+
+            for b, a in enumerate(pos_magnitude):
+                log_writer.add_scalar(f"monitoring_ft/pos_magnitude_per_block/{b}", a.item(), epoch)
+
 
             if wandb.run is not None:
                 f, ax = plt.subplots(1, 1)
@@ -408,6 +417,12 @@ def main(args):
                 ax.plot(list(range(len(pos_pos_entropy))), pos_pos_entropy, label="pos_pos_entropy")
                 ax.legend()
                 wandb.log({f"monitoring_ft/entropy_stats": f})
+
+                f, ax = plt.subplots(1, 1)
+                ax.plot(list(range(len(cls_magnitude))), cls_magnitude, label="cls_magnitude")
+                ax.plot(list(range(len(pos_magnitude))), pos_magnitude, label="pos_magnitude")
+                ax.legend()
+                wandb.log({f"monitoring_ft/magnitude_stats": f})
 
 
 
