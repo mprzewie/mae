@@ -325,6 +325,40 @@ def main(args):
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)
 
+    _, _, A_test, M_test = collect_features(
+        model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
+        return_features=args.cls_features
+    )
+
+    mean_attn_stats = A_test.mean(dim=(0, 2))
+    mean_magn_stats = M_test.mean(dim=0)
+
+
+    cc_attns = mean_attn_stats[:, 0]
+    pos_self_attns = mean_attn_stats[:, 1]
+    cls_pos_attns = mean_attn_stats[:, 2] # should complement the cls cls attention
+    pos_cls_attns = mean_attn_stats[:, 3]
+    cls_pos_entropy = mean_attn_stats[:, 4]
+    pos_pos_entropy = mean_attn_stats[:, 5]
+    cls_magnitude = mean_magn_stats[:, 0]
+    pos_magnitude = mean_magn_stats[:, 1]
+
+
+    stats_pf = "test_attn"
+    if wandb.run is not None:
+        for b in range(len(cc_attns)):
+            wandb.log({
+                f"{stats_pf}/cls_cls_attention": cc_attns[b],
+                f"{stats_pf}/pos_self_attention": pos_self_attns[b],
+                f"{stats_pf}/cls_pos_attention": cls_pos_attns[b],
+                f"{stats_pf}/pos_cls_attention": pos_cls_attns[b],
+                f"{stats_pf}/cls_pos_entropy": cls_pos_entropy[b],
+                f"{stats_pf}/pos_pos_entropy": pos_pos_entropy[b],
+                f"{stats_pf}/cls_magnitude": cls_magnitude[b],
+                f"{stats_pf}/pos_magnitude": pos_magnitude[b],
+                f"{stats_pf}/vit_block": b,
+            })
+
 
     _, _, A_train, _ = collect_features(
         model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
@@ -460,34 +494,6 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
-    mean_attn_stats = A_test.mean(dim=(0, 2))
-    mean_magn_stats = M_test.mean(dim=0)
-
-
-    cc_attns = mean_attn_stats[:, 0]
-    pos_self_attns = mean_attn_stats[:, 1]
-    cls_pos_attns = mean_attn_stats[:, 2] # should complement the cls cls attention
-    pos_cls_attns = mean_attn_stats[:, 3]
-    cls_pos_entropy = mean_attn_stats[:, 4]
-    pos_pos_entropy = mean_attn_stats[:, 5]
-    cls_magnitude = mean_magn_stats[:, 0]
-    pos_magnitude = mean_magn_stats[:, 1]
-
-
-    stats_pf = "test_attn"
-    if wandb.run is not None:
-        for b in range(len(cc_attns)):
-            wandb.log({
-                f"{stats_pf}/cls_cls_attention": cc_attns[b],
-                f"{stats_pf}/pos_self_attention": pos_self_attns[b],
-                f"{stats_pf}/cls_pos_attention": cls_pos_attns[b],
-                f"{stats_pf}/pos_cls_attention": pos_cls_attns[b],
-                f"{stats_pf}/cls_pos_entropy": cls_pos_entropy[b],
-                f"{stats_pf}/pos_pos_entropy": pos_pos_entropy[b],
-                f"{stats_pf}/cls_magnitude": cls_magnitude[b],
-                f"{stats_pf}/pos_magnitude": pos_magnitude[b],
-                f"{stats_pf}/vit_block": b,
-            })
 
 
 def collect_features(
