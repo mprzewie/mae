@@ -463,8 +463,6 @@ def main(args):
     mean_attn_stats = A_test.mean(dim=(0, 2))
     mean_magn_stats = M_test.mean(dim=0)
 
-    assert False, [t.shape for t in [A_test,  mean_attn_stats, mean_magn_stats]]
-
 
     cc_attns = mean_attn_stats[:, 0]
     pos_self_attns = mean_attn_stats[:, 1]
@@ -533,6 +531,7 @@ def collect_features(
 
 
             # debugging only!
+            # # TODO
             # if i > 2:
             #     break
 
