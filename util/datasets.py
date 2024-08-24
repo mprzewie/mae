@@ -12,6 +12,7 @@ import os
 from typing import Type
 
 import PIL
+from PIL import Image
 
 from torchvision import datasets, transforms
 
@@ -25,6 +26,23 @@ def build_dataset_v2(args, is_pretrain: bool):
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+
+
+    if args.dino_aug:
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(args.input_size, scale=(0.4, 1.), interpolation=Image.BICUBIC),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply(
+                [transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.2, hue=0.1)],
+                p=0.8
+            ),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))], p=0.1),
+            transforms.RandomSolarize(threshold=128, p=0.2),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+
     transform_val = transforms.Compose([
         transforms.Resize(int(args.input_size * 16/14), interpolation=3),
         transforms.CenterCrop(args.input_size),
