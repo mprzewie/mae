@@ -234,7 +234,7 @@ class MaskedAutoencoderViT(nn.Module):
         x_blocks = [x]
         cls_cls_attns = []
         for blk in self.blocks:
-            x, attn = blk(x, return_attention=True)
+            x, attn, _ = blk(x, return_attention=True)
             x_blocks.append(x)
             cls_cls_attns.append(attn[:, :, :1, :1])
 

@@ -39,6 +39,7 @@ def build_dataset_v2(args, is_pretrain: bool):
             transforms.RandomGrayscale(p=0.2),
             transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))], p=0.1),
             transforms.RandomSolarize(threshold=128, p=0.2),
+            transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
