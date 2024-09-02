@@ -109,6 +109,7 @@ def get_args_parser():
                         help='url used to set up distributed training')
 
     # new
+    parser.add_argument('--decoder_depth', type=int, default=8)
     parser.add_argument('--lamb', type=float, default=0)
     parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
     parser.add_argument("--lpred_loss", type=str, default="mse", choices=["mse", "cos", "dino"])
@@ -218,6 +219,7 @@ def main(args):
 
     # define the model
     model: models_mae.MaskedAutoencoderViT = models_mae.__dict__[args.model](
+        decoder_depth=args.decoder_depth,
         norm_pix_loss=args.norm_pix_loss,
         latent_decoder_arch=args.lpred_decoder_arch,
         latent_decoder_depth=args.lpred_decoder_depth,

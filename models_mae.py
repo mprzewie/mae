@@ -353,33 +353,33 @@ class MaskedAutoencoderViT(nn.Module):
         return mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred)
 
 
-def mae_vit_tiny_patch16_dec192d4b(img_size=224, patch_size=16, **kwargs):
+def mae_vit_tiny_patch16_dec192d4b(img_size=224, patch_size=16, decoder_depth=4, **kwargs):
     model = MaskedAutoencoderViT(
         img_size=img_size, patch_size=patch_size, embed_dim=192, depth=12, num_heads=3,
-        decoder_embed_dim=192, decoder_depth=4, decoder_num_heads=3,
+        decoder_embed_dim=192, decoder_depth=decoder_depth, decoder_num_heads=3,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
-def mae_vit_small_patch16_dec384d8b(img_size=224, patch_size=16, **kwargs):
+def mae_vit_small_patch16_dec384d8b(img_size=224, patch_size=16, decoder_depth=8, **kwargs):
     model = MaskedAutoencoderViT(
         img_size=img_size, patch_size=patch_size, embed_dim=384, depth=12, num_heads=6,
-        decoder_embed_dim=192, decoder_depth=8, decoder_num_heads=16,
+        decoder_embed_dim=192,  decoder_depth=decoder_depth, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 
-def mae_vit_base_patch16_dec512d8b(img_size=224, patch_size=16, **kwargs):
+def mae_vit_base_patch16_dec512d8b(img_size=224, patch_size=16, decoder_depth=8, **kwargs):
     model = MaskedAutoencoderViT(
         img_size=img_size, patch_size=patch_size, embed_dim=768, depth=12, num_heads=12,
-        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
+        decoder_embed_dim=512, decoder_depth=decoder_depth, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 
-def mae_vit_large_patch16_dec512d8b(**kwargs):
+def mae_vit_large_patch16_dec512d8b(decoder_depth=8, **kwargs):
     model = MaskedAutoencoderViT(
         patch_size=16, embed_dim=1024, depth=24, num_heads=16,
-        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
+        decoder_embed_dim=512, decoder_depth=decoder_depth, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
