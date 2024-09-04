@@ -259,7 +259,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         # apply Transformer blocks
         for blk in self.decoder_blocks:
-            x = blk(x)
+            x, attn, magn = blk.forward(x, return_attention=True)
         x = self.decoder_norm(x)
 
         # predictor projection

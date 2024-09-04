@@ -337,10 +337,12 @@ def main(args):
 
     cc_attns = mean_attn_stats[:, 0]
     pos_self_attns = mean_attn_stats[:, 1]
-    cls_pos_attns = mean_attn_stats[:, 2] # should complement the cls cls attention
-    pos_cls_attns = mean_attn_stats[:, 3]
-    cls_pos_entropy = mean_attn_stats[:, 4]
-    pos_pos_entropy = mean_attn_stats[:, 5]
+    cc_attns_adj = mean_attn_stats[:, 2]
+    pos_self_attns_adj = mean_attn_stats[:, 3]
+    cls_pos_attns = mean_attn_stats[:, 4] # should complement the cls cls attention
+    pos_cls_attns = mean_attn_stats[:, 5]
+    cls_pos_entropy = mean_attn_stats[:, 6]
+    pos_pos_entropy = mean_attn_stats[:, 7]
     cls_magnitude = mean_magn_stats[:, 0]
     pos_magnitude = mean_magn_stats[:, 1]
 
@@ -351,6 +353,8 @@ def main(args):
             wandb.log({
                 f"{stats_pf}/cls_cls_attention": cc_attns[b],
                 f"{stats_pf}/pos_self_attention": pos_self_attns[b],
+                f"{stats_pf}/cls_cls_attention_adj_for_cls": cc_attns_adj[b],
+                f"{stats_pf}/pos_self_attention_adj_for_cls": pos_self_attns_adj[b],
                 f"{stats_pf}/cls_pos_attention": cls_pos_attns[b],
                 f"{stats_pf}/pos_cls_attention": pos_cls_attns[b],
                 f"{stats_pf}/cls_pos_entropy": cls_pos_entropy[b],
@@ -514,13 +518,18 @@ def collect_features(
 
             cls_cls_attns = attns[0, :, :, :, :1]
             pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)
-            cls_pos_attns = attns[1, :, :, :, 1:].mean(dim=3, keepdim=True)
-            pos_cls_attns = attns[2, :, :, :, 1:].mean(dim=3, keepdim=True)
 
-            cls_pos_entropy = attns[3, :, :, :, :1]
-            pos_pos_entropy = attns[3, :, :, :, 1:].mean(dim=3, keepdim=True)
+            cls_cls_attns_adj = attns[1, :, :, :, :1]
+            pos_self_attns_adj = attns[1, :, :, :, 1:].mean(dim=3, keepdim=True)
 
-            attn_stats = torch.cat([cls_cls_attns, pos_self_attns, cls_pos_attns, pos_cls_attns, cls_pos_entropy, pos_pos_entropy], dim=3)
+
+            cls_pos_attns = attns[2, :, :, :, 1:].mean(dim=3, keepdim=True)
+            pos_cls_attns = attns[3, :, :, :, 1:].mean(dim=3, keepdim=True)
+
+            cls_pos_entropy = attns[4, :, :, :, :1]
+            pos_pos_entropy = attns[4, :, :, :, 1:].mean(dim=3, keepdim=True)
+
+            attn_stats = torch.cat([cls_cls_attns, pos_self_attns, cls_cls_attns_adj, pos_self_attns_adj, cls_pos_attns, pos_cls_attns, cls_pos_entropy, pos_pos_entropy], dim=3)
 
             magn_residual = magnitudes[0]
             magn_attended = magnitudes[1]

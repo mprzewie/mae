@@ -227,15 +227,19 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             attn_wo_cls_denom = attn_wo_cls.sum(dim=3, keepdim=True)
 
             # print(attn_wo_cls_denom[0,0])
+
             attn_wo_cls = attn_wo_cls / (attn_wo_cls_denom + 1e-6)
+
 
             all_pos_attn_entropy = -(attn_wo_cls * (attn_wo_cls + 1e-6).log()).sum(dim=3)
 
-            attn_stats = torch.stack([attn_diag, cls_all_attn, all_cls_attn, all_pos_attn_entropy])
+            attn_adj_for_cls = attn / (attn_wo_cls_denom + 1e-6)
+
+            attn_diag_adj_for_cls = attn_adj_for_cls[:, :, attn_range, attn_range]
+
+            attn_stats = torch.stack([attn_diag, attn_diag_adj_for_cls, cls_all_attn, all_cls_attn, all_pos_attn_entropy])
 
             attn_stats = attn_stats.unsqueeze(2)
-
-            # assert False, [t.shape for t in [attn_stats, magn]]
 
             # assert False, attn_stats.shape
             attentions.append(attn_stats.detach())
