@@ -134,6 +134,7 @@ def get_args_parser():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
+    parser.add_argument("attn_only", action="store_true", default=False)
 
 
     return parser
@@ -364,6 +365,8 @@ def main(args):
                 f"{stats_pf}/vit_block": b,
             })
 
+    if args.attn_only:
+        exit(0)
 
     _, _, A_train, _ = collect_features(
         model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
