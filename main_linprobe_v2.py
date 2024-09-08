@@ -50,7 +50,7 @@ from util.lars import LARS
 from util.crop import RandomResizedCrop
 
 import models_vit
-
+import models_simmim
 from engine_finetune import train_one_epoch, evaluate
 
 
@@ -69,6 +69,7 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
+    parser.add_argument("--simmim", action="store_true", default=False)
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0 for linear probe following MoCo v1)')
@@ -229,18 +230,21 @@ def main(args):
         "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
         "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
     }
-    model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
-        num_classes=args.nb_classes,
-        global_pool=False, #args.global_pool,
-        n_last_layers=args.n_last_layers,
-        block_reshuffling=args.block_reshuffling,
-        **size_patch_kwargs
-    )
-    print(model)
+    if args.simmim:
+        model = models_simmim.__dict__[args.model]()
+    else:
+        model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
+            num_classes=args.nb_classes,
+            global_pool=False, #args.global_pool,
+            n_last_layers=args.n_last_layers,
+            block_reshuffling=args.block_reshuffling,
+            **size_patch_kwargs
+        )
+        #print(model)
 
     classifier = AggHead(model.head, agg_method=args.agg_method)
 
-    if args.finetune and not args.eval:
+    if args.finetune and not args.eval and not args.simmim:
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
             checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
@@ -293,7 +297,7 @@ def main(args):
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print("Model = %s" % str(model_without_ddp))
+    print("Model = %s" % str(model_without_ddp.__class__))
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()

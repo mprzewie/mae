@@ -321,7 +321,7 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x, return_features: str = "cls"):
+    def forward_features(self, x, return_features: str = "cls", shuffle_subsets=None):
         x = self.patch_embed(x)
         batch_size, seq_len, _ = x.size()
 
@@ -477,7 +477,9 @@ def vit_base_finetuned():
     state_dict = torch.load("simmim_finetune__vit_base__img224__800ep.pth")["model"]
     state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items()}
 
-    model.load_state_dict(state_dict)
+    res = model.load_state_dict(state_dict)
+    print(res)
+
     return model
         
         
