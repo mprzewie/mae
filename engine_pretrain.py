@@ -64,7 +64,7 @@ def train_one_epoch(model: MaskedAutoencoderViT,
                 enabled=args.amp != "none",
                 dtype=AMP_PRECISIONS[args.amp]
         ):
-            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples,
+            loss_mae, _, _, (cls_feats, outputs, latent, latent_proj, ids_restore, latent_pred) = model.forward(samples,
                                                                                                    mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
@@ -72,7 +72,7 @@ def train_one_epoch(model: MaskedAutoencoderViT,
             else:
                 loss_reg = uniformity_loss(cls_feats)
 
-            target_latent = latent[:, 1:]
+            target_latent = latent_proj[:, 1:]
 
             loss_latent = cls_pos_loss.forward(target_latent, latent_pred, epoch=epoch)
 

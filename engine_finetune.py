@@ -125,7 +125,7 @@ def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer],
         with torch.cuda.amp.autocast():
             output = model.forward(images)
             if type(output) is tuple:
-                _, _, _, (_, output, _, _, _) = output
+                _, _, _, (_, output,_, _, _, _) = output
 
             loss = criterion(output, target)
 
@@ -189,17 +189,17 @@ def calculate_cls_cls_attention(data_loader, model: MaskedAutoencoderViT, device
 @torch.no_grad()
 def draw_mae_predictions(dataset, model: MaskedAutoencoderViT, device):
     val_img = torch.stack([dataset[i][0] for i in range(16)]).to(device)
-    mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(val_img)
+    mae_loss, pred, mask, (cls_feats, outputs, latent, latent_proj, ids_restore, latent_pred) = model.forward(val_img)
     pred_img = model.unpatchify(pred)
 
-    d_input = torch.cat([latent[:, :1], latent_pred], 1)
+    # d_input = torch.cat([latent[:, :1], latent_pred], 1)
 
-    latent_pred_img_p = model.forward_decoder(d_input, ids_restore)
-    latent_pred_img = model.unpatchify(latent_pred_img_p)
+    # latent_pred_img_p = model.forward_decoder(d_input, ids_restore)
+    # latent_pred_img = model.unpatchify(latent_pred_img_p)
 
     patched_img = model.patchify(val_img)
     masked_patched_img = patched_img * (mask.unsqueeze(2) - 1) * (-1)
     masked_img = model.unpatchify(masked_patched_img)
-    img = torch.cat([val_img, masked_img, pred_img, latent_pred_img], dim=0)
-    img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=4)
+    img = torch.cat([val_img, masked_img, pred_img], dim=0)
+    img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
     return img
