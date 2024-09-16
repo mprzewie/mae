@@ -244,7 +244,8 @@ def main(args):
 
     classifier = AggHead(model.head, agg_method=args.agg_method)
 
-    if args.finetune and not args.eval and not args.simmim:
+    if (args.finetune and not args.eval):
+
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
             checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
@@ -278,7 +279,7 @@ def main(args):
         # assert set(msg.missing_keys) == {'head.weight', 'head.bias'}, msg.missing_keys
 
         # manually initialize fc layer: following MoCo v3
-        trunc_normal_(classifier.mlp.weight, std=0.01)
+    trunc_normal_(classifier.mlp.weight, std=0.01)
 
     # for linear prob only
     # assert False, model.head
