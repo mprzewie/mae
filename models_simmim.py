@@ -321,7 +321,7 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x, return_features: str = "cls", shuffle_subsets=None):
+    def forward_features(self, x, return_features: str = "cls", shuffle_subsets=None, return_block_output=8):
         x = self.patch_embed(x)
         batch_size, seq_len, _ = x.size()
 
@@ -335,13 +335,18 @@ class VisionTransformer(nn.Module):
 
         attentions = [] # !
         magnitudes = []  # !
-        for blk in self.blocks:
+        to_return = None
+        for i, blk in enumerate(self.blocks):
             x, attn, magn = blk(x, rel_pos_bias=rel_pos_bias, return_attention=True)  # !
             calculate_attn_stuff(attn, magn, attentions, magnitudes) # !
+            if i == return_block_output:
+                to_return = x
+                
+        if return_block_output is None:
+            to_return = x
 
-
-        x_cls = x[:, 0]
-        x_pos = x[:, 1:].mean(dim=1)
+        x_cls = to_return[:, 0]
+        x_pos = to_return[:, 1:].mean(dim=1)
         if return_features == "cls":
             ret = x_cls
         elif return_features == "pos":
@@ -358,7 +363,6 @@ class VisionTransformer(nn.Module):
 
     def forward(self, x: torch.Tensor, return_features: str = "cls") -> torch.Tensor:
         x, attn, magnitudes = self.forward_features(x, return_features=return_features)
-        assert False, "head not initalized"
         x = self.head(x)
         return x
             
