@@ -492,13 +492,14 @@ def main(args):
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
-    outputs = {
-        "targets": test_targets,
-        "preds": test_preds,
-        "attentions": A_test,
-        "magnitudes": M_test,
-    }
-    torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
+    if args.shuffle_subsets == 1:
+        outputs = {
+            "targets": test_targets,
+            "preds": test_preds,
+            "attentions": A_test,
+            "magnitudes": M_test,
+        }
+        torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
