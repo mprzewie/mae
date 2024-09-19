@@ -562,8 +562,9 @@ def collect_features(
 
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
-    attns_list = torch.cat(attns_list, dim=0)
-    magns_list = torch.cat(magn_list, dim=0)
+
+    attns_list = torch.cat(attns_list, dim=0) if shuffle_subsets == 1 else None
+    magns_list = torch.cat(magn_list, dim=0) if shuffle_subsets == 1 else None
 
     return features, labels, attns_list, magns_list
 
