@@ -426,6 +426,7 @@ def main(args):
                 model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
                 return_features=args.cls_features
             )
+
             ds_train = TensorDataset(X_train, Y_train)
             dl_train = torch.utils.data.DataLoader(
                 ds_train, shuffle=True,
@@ -548,8 +549,10 @@ def collect_features(
 
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
-            attns_list.append(attn_stats.detach().cpu())
-            magn_list.append(magn_stats.detach().cpu())
+
+            if shuffle_subsets == 1:
+                attns_list.append(attn_stats.detach().cpu())
+                magn_list.append(magn_stats.detach().cpu())
 
 
             # debugging only!
