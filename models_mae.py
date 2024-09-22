@@ -75,6 +75,9 @@ class MaskedAutoencoderViT(nn.Module):
         self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)  # decoder to patch
         # --------------------------------------------------------------------------
         self.enc_cls_postprocessing = enc_cls_postprocessing
+        if self.enc_cls_postprocessing == "patchcond":
+            self.patch_cls_merger = nn.Linear(embed_dim*2, embed_dim)
+
         self.l_decoder_embed_dim = latent_decoder_embed_dim or decoder_embed_dim
         self.l_decoder_arch = latent_decoder_arch
         self.l_detach_cls = latent_loss_detach_classifier
@@ -346,6 +349,11 @@ class MaskedAutoencoderViT(nn.Module):
             cls_tokens = cls_tokens.detach()
         elif self.enc_cls_postprocessing == "zero":
             cls_tokens = torch.zeros_like(cls_tokens)
+        elif self.enc_cls_postprocessing == "patchcond":
+            cond_cls = cls_tokens.repeat(1, patch_tokens.shape[1], 1)
+            cond_patch = torch.cat([cond_cls, patch_tokens], dim=2)
+            patch_tokens = self.patch_cls_merger(cond_patch)
+            cls_tokens = cls_tokens.detach()
 
         new_latent = torch.cat([cls_tokens, patch_tokens], dim=1)
         return new_latent

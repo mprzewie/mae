@@ -115,7 +115,7 @@ def get_args_parser():
     parser.add_argument("--lpred_loss", type=str, default="mse", choices=["mse", "cos", "dino"])
     parser.add_argument("--lpred_lambda", type=float, default=0., help="weight of loss of latent prediction from cls token")
     # parser.add_argument("--lpred_no_detach", "-llndt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
-    parser.add_argument("--enc_cls_postprocessing", "-ecp", choices=["none", "detach", "zero"], default="none")
+    parser.add_argument("--enc_cls_postprocessing", "-ecp", choices=["none", "detach", "zero", "patchcond"], default="none")
     parser.add_argument("--latent_loss_detach_cls", "-lldc", action="store_true", default=False)
     parser.add_argument("--lpred_decoder_arch", "-lda", choices=["vit", "mlp"], default="vit")
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
