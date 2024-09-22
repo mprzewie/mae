@@ -229,7 +229,7 @@ def main(args):
         latent_cls_input=args.latent_cls_input,
         latent_decoder_embed_dim=args.lpred_decoder_embed_dim,
         latent_decoder_dropout_rate=args.lpred_decoder_dropout_rate,
-        enc_cls_postprocessing=args.enc_cls_postprocessing
+        enc_cls_postprocessing=args.enc_cls_postprocessing,
         **size_patch_kwargs
     )
 
