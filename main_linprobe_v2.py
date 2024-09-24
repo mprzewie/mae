@@ -368,7 +368,7 @@ def main(args):
         fig, ax = plt.subplots()
 
         for label in range(10):
-            l_subset = latent_2d[Y_test == label]
+            l_subset = latent_2d[Y_test == label][:25]
             ax.scatter(l_subset[:, 0], l_subset[:, 1], label=label)
 
         ax.legend()
