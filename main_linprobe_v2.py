@@ -26,6 +26,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision
 import wandb
+from sklearn.manifold import TSNE
 from timm.utils import accuracy
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
@@ -135,6 +136,7 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
     parser.add_argument("--attn_only", action="store_true", default=False)
+    parser.add_argument("--draw_2d_embeddings", action="store_true", default=False)
 
 
     return parser
@@ -196,8 +198,6 @@ def main(args):
     # assert False, (len(dataset_train), len(dataset_val))
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
-        # batch_size=12,
-        # batch_size=512,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -206,8 +206,6 @@ def main(args):
 
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, sampler=sampler_val,
-        # batch_size=12,
-        # batch_size=512,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -328,7 +326,7 @@ def main(args):
         exit(0)
 
     if args.shuffle_subsets == 1 and wandb.run is not None:
-        _, _, A_test, M_test = collect_features(
+        L_test, Y_test, A_test, M_test = collect_features(
             model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
             return_features=args.cls_features
         )
@@ -363,6 +361,20 @@ def main(args):
                 f"{stats_pf}/pos_magnitude": pos_magnitude[b],
                 f"{stats_pf}/vit_block": b,
             })
+
+        tsne = TSNE()
+        latent_2d = tsne.fit_transform(L_test.numpy())
+        Y_test = Y_test.numpy()
+        fig, ax = plt.subplots()
+
+        for label in range(10):
+            l_subset = latent_2d[Y_test == label]
+            ax.scatter(l_subset[:, 0], l_subset[:, 1], label=label)
+
+        ax.legend()
+        wandb.log(
+            {"monitoring/tsne": fig}
+        )
 
     if args.attn_only:
         exit(0)
