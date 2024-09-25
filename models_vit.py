@@ -187,7 +187,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         assert not self.block_reshuffling
 
     def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls"):
-        assert shuffle_subsets == 1
+        # assert shuffle_subsets == 1, shuffle_subsets
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -196,28 +196,28 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        # x_cls = x[:, :1]
-        # x_pos = x[:, 1:]
-        #
-        # assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
-        # x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
-        # B, L, D = x_pos.shape
-        #
-        # noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
-        # ids_shuffle = torch.argsort(noise, dim=1)
-        # x_pos_shuffled = torch.gather(x_pos, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
-        # x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
-        #
-        # x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
-        #     B*shuffle_subsets, (L//shuffle_subsets)+1, D
-        # )
+        x_cls = x[:, :1]
+        x_pos = x[:, 1:]
+
+        assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
+        x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
+        B, L, D = x_pos.shape
+
+        noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
+        ids_shuffle = torch.argsort(noise, dim=1)
+        x_pos_shuffled = torch.gather(x_pos, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
+        x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
+
+        x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
+            B*shuffle_subsets, (L//shuffle_subsets)+1, D
+        )
 
         attentions = []
         magnitudes = []
         for blk in self.blocks:
             x, attn, magn = blk.forward(x, return_attention=True)
 
-            B, H, T, T = attn.shape
+            _, _, T, T = attn.shape
             attn_range = torch.arange(T)
             attn_diag = attn[:, :, attn_range, attn_range] # attention of tokens w.r.t. themselves
             cls_all_attn = attn[:, :, 0, ]  # attention of cls token to all tokens
@@ -225,8 +225,6 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             attn_wo_cls = attn[:, :, :, 1:]
             attn_wo_cls_denom = attn_wo_cls.sum(dim=3, keepdim=True)
-
-            # print(attn_wo_cls_denom[0,0])
 
             attn_wo_cls = attn_wo_cls / (attn_wo_cls_denom + 1e-6)
 
@@ -256,15 +254,20 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             #         B * shuffle_subsets, (L // shuffle_subsets) + 1, D
             #     )
 
-        # x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L//shuffle_subsets)+1, D)
-        # x_cls = x_n_s_cl_d[:, :, 0]
-        # x_pos = x_n_s_cl_d[:, :, 1:].mean(dim=2)
+        x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L//shuffle_subsets)+1, D)
+
+        x_cls = x_n_s_cl_d[:, :, 0]
+        x_pos = x_n_s_cl_d[:, :, 1:].mean(dim=2)
+
+        # average back the shuffled subsets
+        x_cls = x_cls.mean(dim=1)
+        x_pos = x_pos.mean(dim=1)
 
         # ret = []
 
-        x_cls = x[:, 0]
+        # x_cls = x[:, 0]
 
-        x_pos = x[:, 1:].mean(dim=1)
+        # x_pos = x[:, 1:].mean(dim=1)
 
         if return_features == "cls":
             ret = x_cls

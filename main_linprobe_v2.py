@@ -26,6 +26,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision
 import wandb
+from sklearn.manifold import TSNE
 from timm.utils import accuracy
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
@@ -135,6 +136,7 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
     parser.add_argument("--attn_only", action="store_true", default=False)
+    parser.add_argument("--draw_2d_embeddings", action="store_true", default=False)
 
 
     return parser
@@ -332,29 +334,28 @@ def main(args):
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)
 
-    _, _, A_test, M_test = collect_features(
-        model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
-        return_features=args.cls_features
-    )
+    if args.shuffle_subsets == 1 and wandb.run is not None:
+        L_test, Y_test, A_test, M_test = collect_features(
+            model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
+            return_features=args.cls_features
+        )
 
-    mean_attn_stats = A_test.mean(dim=(0, 2))
-    mean_magn_stats = M_test.mean(dim=0)
-
-
-    cc_attns = mean_attn_stats[:, 0]
-    pos_self_attns = mean_attn_stats[:, 1]
-    cc_attns_adj = mean_attn_stats[:, 2]
-    pos_self_attns_adj = mean_attn_stats[:, 3]
-    cls_pos_attns = mean_attn_stats[:, 4] # should complement the cls cls attention
-    pos_cls_attns = mean_attn_stats[:, 5]
-    cls_pos_entropy = mean_attn_stats[:, 6]
-    pos_pos_entropy = mean_attn_stats[:, 7]
-    cls_magnitude = mean_magn_stats[:, 0]
-    pos_magnitude = mean_magn_stats[:, 1]
+        mean_attn_stats = A_test.mean(dim=(0, 2))
+        mean_magn_stats = M_test.mean(dim=0)
 
 
-    stats_pf = "test_attn"
-    if wandb.run is not None:
+        cc_attns = mean_attn_stats[:, 0]
+        pos_self_attns = mean_attn_stats[:, 1]
+        cc_attns_adj = mean_attn_stats[:, 2]
+        pos_self_attns_adj = mean_attn_stats[:, 3]
+        cls_pos_attns = mean_attn_stats[:, 4] # should complement the cls cls attention
+        pos_cls_attns = mean_attn_stats[:, 5]
+        cls_pos_entropy = mean_attn_stats[:, 6]
+        pos_pos_entropy = mean_attn_stats[:, 7]
+        cls_magnitude = mean_magn_stats[:, 0]
+        pos_magnitude = mean_magn_stats[:, 1]
+
+        stats_pf = "test_attn"
         for b in range(len(cc_attns)):
             wandb.log({
                 f"{stats_pf}/cls_cls_attention": cc_attns[b],
@@ -370,56 +371,70 @@ def main(args):
                 f"{stats_pf}/vit_block": b,
             })
 
+        tsne = TSNE()
+        latent_2d = tsne.fit_transform(L_test.numpy())
+        Y_test = Y_test.numpy()
+        fig, ax = plt.subplots()
+
+        for label in range(10):
+            l_subset = latent_2d[Y_test == label][:25]
+            ax.scatter(l_subset[:, 0], l_subset[:, 1], label=label)
+
+        ax.legend()
+        wandb.log(
+            {"monitoring/tsne": fig}
+        )
+
     if args.attn_only:
         exit(0)
 
-    _, _, A_train, _ = collect_features(
-        model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
-        return_features=args.cls_features
-    )
-
-    cca = A_train[:, :, :, 0].mean(dim=0)
-    ccs = A_train[:, :, :, 0].std(dim=0)
-
-    cca_mean = cca.mean(dim=1)
-    n_blocks = len(model_without_ddp.blocks)
-    target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
-
-    if args.cca_bias.startswith("linear"):
-        cca_biases = target_cca.unsqueeze(1) - cca
-
-        if "clamp_ceil" in args.cca_bias:
-            cca_biases = cca_biases.clamp(max=0)
-
-        for bi in range(n_blocks):
-            model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
-
-    elif args.cca_bias != "none":
-        raise NotImplementedError(args.cca_bias)
-
-    if args.cca_bias != "none":
-        _, _, A_train, _ = collect_features(
-            model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
-            return_features=args.cls_features
-        )
-
-    cca2 = A_train[:, :, :, 0].mean(dim=0)
-    cca_mean2 = cca2.mean(dim=1)
-
-    fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
-    for h in range(cca.shape[1]):
-        ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
-        ax[h].plot(cca_mean, color="red", label=f"mean cca before")
-        ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
-        ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
-        ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
-        ax[h].set_title(f"Head {h}")
-        ax[h].set_xlabel("VIT Block")
-        ax[h].set_ylim(-0.1, 1.2)
-        ax[0].legend(ncols=5)
-
-    if wandb.run is not None:
-        wandb.log({"monitoring/cca_bias": fig})
+    # _, _, A_train, _ = collect_features(
+    #     model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
+    #     return_features=args.cls_features
+    # )
+    #
+    # cca = A_train[:, :, :, 0].mean(dim=0)
+    # ccs = A_train[:, :, :, 0].std(dim=0)
+    #
+    # cca_mean = cca.mean(dim=1)
+    # n_blocks = len(model_without_ddp.blocks)
+    # target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
+    #
+    # if args.cca_bias.startswith("linear"):
+    #     cca_biases = target_cca.unsqueeze(1) - cca
+    #
+    #     if "clamp_ceil" in args.cca_bias:
+    #         cca_biases = cca_biases.clamp(max=0)
+    #
+    #     for bi in range(n_blocks):
+    #         model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
+    #
+    # elif args.cca_bias != "none":
+    #     raise NotImplementedError(args.cca_bias)
+    #
+    # if args.cca_bias != "none":
+    #     _, _, A_train, _ = collect_features(
+    #         model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
+    #         return_features=args.cls_features
+    #     )
+    #
+    # cca2 = A_train[:, :, :, 0].mean(dim=0)
+    # cca_mean2 = cca2.mean(dim=1)
+    #
+    # fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
+    # for h in range(cca.shape[1]):
+    #     ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
+    #     ax[h].plot(cca_mean, color="red", label=f"mean cca before")
+    #     ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
+    #     ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
+    #     ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
+    #     ax[h].set_title(f"Head {h}")
+    #     ax[h].set_xlabel("VIT Block")
+    #     ax[h].set_ylim(-0.1, 1.2)
+    #     ax[0].legend(ncols=5)
+    #
+    # if wandb.run is not None:
+    #     wandb.log({"monitoring/cca_bias": fig})
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
@@ -432,6 +447,7 @@ def main(args):
                 model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
                 return_features=args.cls_features
             )
+
             ds_train = TensorDataset(X_train, Y_train)
             dl_train = torch.utils.data.DataLoader(
                 ds_train, shuffle=True,
@@ -476,6 +492,9 @@ def main(args):
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
         lin_pf = f"test_linear_{args.cls_features}"
+        if args.shuffle_subsets > 1:
+            lin_pf = f"{lin_pf}_ss{args.shuffle_subsets}"
+
         if log_writer is not None:
             log_writer.add_scalar(f'{lin_pf}/test_acc1', test_stats['acc1'], epoch)
             log_writer.add_scalar(f'{lin_pf}/test_acc5', test_stats['acc5'], epoch)
@@ -495,13 +514,14 @@ def main(args):
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
-    outputs = {
-        "targets": test_targets,
-        "preds": test_preds,
-        "attentions": A_test,
-        "magnitudes": M_test,
-    }
-    torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
+    if args.shuffle_subsets == 1:
+        outputs = {
+            "targets": test_targets,
+            "preds": test_preds,
+            "attentions": A_test,
+            "magnitudes": M_test,
+        }
+        torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -550,8 +570,10 @@ def collect_features(
 
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
-            attns_list.append(attn_stats.detach().cpu())
-            magn_list.append(magn_stats.detach().cpu())
+
+            if shuffle_subsets == 1:
+                attns_list.append(attn_stats.detach().cpu())
+                magn_list.append(magn_stats.detach().cpu())
 
 
             # debugging only!
@@ -561,8 +583,9 @@ def collect_features(
 
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
-    attns_list = torch.cat(attns_list, dim=0)
-    magns_list = torch.cat(magn_list, dim=0)
+
+    attns_list = torch.cat(attns_list, dim=0) if shuffle_subsets == 1 else None
+    magns_list = torch.cat(magn_list, dim=0) if shuffle_subsets == 1 else None
 
     return features, labels, attns_list, magns_list
 

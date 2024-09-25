@@ -36,7 +36,8 @@ class MaskedAutoencoderViT(nn.Module):
                  latent_decoder_depth: int = 8, latent_decoder_heads: int = 16,
                  latent_loss_detach_classifier: bool = True,
                  latent_cls_input: Literal["cls", "pos"] = "cls",
-                 latent_decoder_dropout_rate: float = 0
+                 latent_decoder_dropout_rate: float = 0,
+                 enc_cls_postprocessing: str = "none"
         ):
         super().__init__()
 
@@ -73,6 +74,10 @@ class MaskedAutoencoderViT(nn.Module):
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)  # decoder to patch
         # --------------------------------------------------------------------------
+        self.enc_cls_postprocessing = enc_cls_postprocessing
+        if self.enc_cls_postprocessing == "patchcond":
+            self.patch_cls_merger = nn.Linear(embed_dim*2, embed_dim)
+
         self.l_decoder_embed_dim = latent_decoder_embed_dim or decoder_embed_dim
         self.l_decoder_arch = latent_decoder_arch
         self.l_detach_cls = latent_loss_detach_classifier
@@ -333,8 +338,30 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         return loss
 
+    def cls_postprocessing(self, latent: torch.Tensor) -> torch.Tensor:
+        if self.enc_cls_postprocessing == "none":
+            return latent
+
+        cls_tokens = latent[:, :1]
+        patch_tokens = latent[:, 1:]
+
+        if self.enc_cls_postprocessing == "detach":
+            cls_tokens = cls_tokens.detach()
+        elif self.enc_cls_postprocessing == "zero":
+            cls_tokens = torch.zeros_like(cls_tokens)
+        elif self.enc_cls_postprocessing == "patchcond":
+            cond_cls = cls_tokens.repeat(1, patch_tokens.shape[1], 1)
+            cond_patch = torch.cat([cond_cls, patch_tokens], dim=2)
+            patch_tokens = self.patch_cls_merger(cond_patch)
+            cls_tokens = cls_tokens.detach()
+
+        new_latent = torch.cat([cls_tokens, patch_tokens], dim=1)
+        return new_latent
+
     def forward(self, imgs, mask_ratio=0.75):
         latent, mask, ids_restore, (x_blocks, attn) = self.forward_encoder(imgs, mask_ratio)
+        latent = self.cls_postprocessing(latent)
+
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
         mae_loss = self.forward_loss(imgs, pred, mask)
 
