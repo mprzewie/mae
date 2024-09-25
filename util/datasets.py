@@ -19,6 +19,7 @@ from torchvision import datasets, transforms
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
+WIDS_CHUNK_SIZE = 10000
 
 def build_dataset_v2(args, is_pretrain: bool):
     transform_train = transforms.Compose([
@@ -50,9 +51,31 @@ def build_dataset_v2(args, is_pretrain: bool):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
-    args.dataset_name = args.data_path.name
+    ds_name = args.data_path.name
+    args.wds = ds_name.endswith("_wds")
 
-    if "cifar" in args.dataset_name:
+    args.dataset_name = ds_name if not args.wds else ds_name.replace("_wds", "")
+
+    if args.wds:
+        import wids
+        train_shards = [
+            dict(url=str(f), samples=WIDS_CHUNK_SIZE)
+            for f in args.data_path.iterdir() if ("train" in f.name and f.name.endswith(".tar"))
+        ]
+        val_shards = [
+            dict(url=str(f), samples=WIDS_CHUNK_SIZE)
+            for f in args.data_path.iterdir() if ("val" in f.name and f.name.endswith(".tar"))
+        ]
+        dataset_train = wids.ShardListDataset(train_shards)
+        dataset_val = wids.ShardListDataset(val_shards)
+
+        trans_train = lambda sample: (transform_train(sample[".jpg"]), sample[".cls"])
+        trans_val = lambda sample: (transform_val(sample[".jpg"]), sample[".cls"])
+
+        dataset_train.add_transform(trans_train)
+        dataset_val.add_transform(trans_val)
+
+    elif "cifar" in args.dataset_name:
         assert args.input_size == 32
         CIFAR_DS: Type[datasets.CIFAR10] = datasets.CIFAR10 if args.dataset_name == 'cifar10' else datasets.CIFAR100
         trans = transforms.Compose([transforms.ToTensor(), transforms.Normalize(0.5, 0.5)])

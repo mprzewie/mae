@@ -230,7 +230,6 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             attn_wo_cls = attn_wo_cls / (attn_wo_cls_denom + 1e-6)
 
-
             all_pos_attn_entropy = -(attn_wo_cls * (attn_wo_cls + 1e-6).log()).sum(dim=3)
 
             attn_adj_for_cls = attn / (attn_wo_cls_denom + 1e-6)
