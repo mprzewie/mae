@@ -58,16 +58,16 @@ def build_dataset_v2(args, is_pretrain: bool):
 
     if args.wds:
         import wids
-        train_shards = [
-            dict(url=str(f), samples=WIDS_CHUNK_SIZE)
-            for f in args.data_path.iterdir() if ("train" in f.name and f.name.endswith(".tar"))
-        ]
-        val_shards = [
-            dict(url=str(f), samples=WIDS_CHUNK_SIZE)
-            for f in args.data_path.iterdir() if ("val" in f.name and f.name.endswith(".tar"))
-        ]
-        dataset_train = wids.ShardListDataset(train_shards)
-        dataset_val = wids.ShardListDataset(val_shards)
+        # train_shards = [
+        #     dict(url=str(f), nsamples=WIDS_CHUNK_SIZE)
+        #     for f in args.data_path.iterdir() if ("train" in f.name and f.name.endswith(".tar"))
+        # ]
+        # val_shards = [
+        #     dict(url=str(f), nsamples=WIDS_CHUNK_SIZE)
+        #     for f in args.data_path.iterdir() if ("val" in f.name and f.name.endswith(".tar"))
+        # ]
+        dataset_train = wids.ShardListDataset(str(args.data_path / "train.json"))
+        dataset_val = wids.ShardListDataset(str(args.data_path / "val.json"))
 
         trans_train = lambda sample: (transform_train(sample[".jpg"]), sample[".cls"])
         trans_val = lambda sample: (transform_val(sample[".jpg"]), sample[".cls"])

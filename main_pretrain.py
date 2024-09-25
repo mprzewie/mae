@@ -37,6 +37,7 @@ import util.misc as misc
 from loss_func import ClsPosLoss
 from util.datasets import build_dataset_v2, WIDS_CHUNK_SIZE
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
+from util.wids_custom import DistributedChunkedSampler
 
 import models_mae
 
@@ -157,13 +158,20 @@ def main(args):
     print(dataset_train)
     print(dataset_val)
 
+    num_tasks = misc.get_world_size()
+    global_rank = misc.get_rank()
+    
     if args.wds:
-        sampler_train = wids.DistributedChunkedSampler(dataset_train, chunksize=WIDS_CHUNK_SIZE, shuffle=True)
-        sampler_val = wids.DistributedChunkedSampler(dataset_val, chunksize=WIDS_CHUNK_SIZE, shuffle=True)
+        
+        sampler_train = DistributedChunkedSampler(dataset_train, chunksize=WIDS_CHUNK_SIZE, shuffle=True)
+        print(len(sampler_train))
+
+        sampler_val = DistributedChunkedSampler(dataset_val, chunksize=WIDS_CHUNK_SIZE, shuffle=True)
+
 
     elif args.distributed:
-        num_tasks = misc.get_world_size()
-        global_rank = misc.get_rank()
+        # num_tasks = misc.get_world_size()
+        # global_rank = misc.get_rank()
 
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
@@ -174,8 +182,8 @@ def main(args):
         )
 
     else:
-        num_tasks = 1
-        global_rank = 0
+        # num_tasks = 1
+        # global_rank = 0
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.RandomSampler(dataset_val)
 
