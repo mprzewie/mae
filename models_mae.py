@@ -79,6 +79,7 @@ class MaskedAutoencoderViT(nn.Module):
             self.patch_cls_merger = nn.Linear(embed_dim*2, embed_dim)
 
         self.l_decoder_embed_dim = latent_decoder_embed_dim or decoder_embed_dim
+        print("self.l_decoder_embed_dim", self.l_decoder_embed_dim)
         self.l_decoder_arch = latent_decoder_arch
         self.l_detach_cls = latent_loss_detach_classifier
         self.l_decoder_norm = norm_layer(self.l_decoder_embed_dim)
@@ -113,6 +114,10 @@ class MaskedAutoencoderViT(nn.Module):
         self.embed_dim = embed_dim
         self.fc_norm = norm_layer(embed_dim)
         self.fc = nn.Linear(embed_dim, num_classes, bias=True)
+
+        print(embed_dim, latent_decoder_embed_dim)
+        self.latent_low_dim_proj = nn.Linear(embed_dim, latent_decoder_embed_dim) \
+            if latent_decoder_embed_dim else nn.Identity()
 
     def initialize_weights(self):
         # initialization
@@ -315,9 +320,9 @@ class MaskedAutoencoderViT(nn.Module):
         ids_shuffle = torch.argsort(ids_restore, dim=1)
         ids_keep = ids_shuffle[:, :(T - 1)]
 
-        x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+        x = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, self.l_decoder_embed_dim))
 
-        assert x.shape == (B, T - 1, D)
+        assert x.shape == (B, T - 1, self.l_decoder_embed_dim)
         return x
 
     def forward_loss(self, imgs, pred, mask):
@@ -377,7 +382,10 @@ class MaskedAutoencoderViT(nn.Module):
             cls_feats = cls_feats[:, 0]
         outputs = self.fc(cls_feats.detach())
 
-        return mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred)
+
+        latent_proj = self.latent_low_dim_proj(latent)
+
+        return mae_loss, pred, mask, (cls_feats, outputs, latent, latent_proj, ids_restore, latent_pred)
 
 
 def mae_vit_tiny_patch16_dec192d4b(img_size=224, patch_size=16, decoder_depth=4, **kwargs):
