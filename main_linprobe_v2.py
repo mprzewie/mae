@@ -168,13 +168,17 @@ def main(args):
     args.distributed = False
     args.gpu = 0
     global_rank = 0
-    # if args.distributed:
+
+    if args.wds:
+        from util.wids_custom import DistributedChunkedSampler
+        sampler_train = DistributedChunkedSampler(dataset_train, shuffle=True)
+        sampler_val = DistributedChunkedSampler(dataset_val, shuffle=False)
+    # elif args.distributed:
     #     num_tasks = misc.get_world_size()
     #     global_rank = misc.get_rank()
     #     sampler_train = torch.utils.data.DistributedSampler(
     #         dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
     #     )
-    #     print("Sampler_train = %s" % str(sampler_train))
     #     if args.dist_eval:
     #         if len(dataset_val) % num_tasks != 0:
     #             print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
@@ -184,9 +188,12 @@ def main(args):
     #             dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
     #     else:
     #         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-    # else:
-    #     sampler_train = torch.utils.data.RandomSampler(dataset_train)
-    #     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    else:
+        sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+
+    print("Sampler_train = %s" % str(sampler_train))
+    print("Sampler_val = %s" % str(sampler_train))
 
     if (not args.distributed or (global_rank == 0)) and args.output_dir is not None and not args.eval:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -199,10 +206,7 @@ def main(args):
     # assert False, (len(dataset_train), len(dataset_val))
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
-        shuffle=True,
-        # sampler=sampler_train,
-        # batch_size=12,
-        # batch_size=512,
+        sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -211,10 +215,7 @@ def main(args):
 
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val,
-        shuffle=False,
-        # sampler=sampler_val,
-        # batch_size=12,
-        # batch_size=512,
+        sampler=sampler_val,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,

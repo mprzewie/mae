@@ -19,7 +19,6 @@ from torchvision import datasets, transforms
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
-WIDS_CHUNK_SIZE = 10000
 
 def build_dataset_v2(args, is_pretrain: bool):
     transform_train = transforms.Compose([

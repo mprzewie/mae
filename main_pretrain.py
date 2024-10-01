@@ -23,6 +23,7 @@ import torch.backends.cudnn as cudnn
 import torchvision
 import wandb
 from matplotlib import pyplot as plt
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -35,7 +36,7 @@ import wids
 
 import util.misc as misc
 from loss_func import ClsPosLoss
-from util.datasets import build_dataset_v2, WIDS_CHUNK_SIZE
+from util.datasets import build_dataset_v2
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.wids_custom import DistributedChunkedSampler
 
@@ -109,6 +110,9 @@ def get_args_parser():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
+    parser.add_argument("--dataloader_affinity_hack", "-dlah",
+                        action='store_true',
+                        help="See: https://github.com/pytorch/pytorch/issues/101850#issuecomment-1717363898")
 
     # new
     parser.add_argument('--decoder_depth', type=int, default=8)
@@ -162,11 +166,8 @@ def main(args):
     global_rank = misc.get_rank()
     
     if args.wds:
-        
-        sampler_train = DistributedChunkedSampler(dataset_train, chunksize=WIDS_CHUNK_SIZE, shuffle=True)
-        print(len(sampler_train))
-
-        sampler_val = DistributedChunkedSampler(dataset_val, chunksize=WIDS_CHUNK_SIZE, shuffle=True)
+        sampler_train = DistributedChunkedSampler(dataset_train, shuffle=True)
+        sampler_val = DistributedChunkedSampler(dataset_val, shuffle=True)
 
 
     elif args.distributed:
@@ -202,6 +203,7 @@ def main(args):
     print("accumulate grad iterations: %d" % args.accum_iter)
     print("effective batch size: %d" % eff_batch_size)
 
+
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
         misc.maybe_setup_wandb(args.log_dir, args=args, job_type="pretrain")
@@ -209,12 +211,16 @@ def main(args):
     else:
         log_writer = None
 
+    def worker_init_fn(worker_id):
+        os.sched_setaffinity(0, range(os.cpu_count()))
+
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
     data_loader_val = torch.utils.data.DataLoader(
@@ -222,7 +228,8 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
     size_patch_kwargs = dict()
@@ -251,7 +258,7 @@ def main(args):
     model.to(device)
 
     model_without_ddp: models_mae.MaskedAutoencoderViT = model
-    print("Model = %s" % str(model_without_ddp))
+    # print("Model = %s" % str(model_without_ddp))
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
