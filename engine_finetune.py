@@ -189,7 +189,7 @@ def calculate_cls_cls_attention(data_loader, model: MaskedAutoencoderViT, device
 @torch.no_grad()
 def draw_mae_predictions(dataset, model: MaskedAutoencoderViT, device):
     val_img = torch.stack([dataset[i][0] for i in range(16)]).to(device)
-    mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(val_img)
+    mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred, attn) = model.forward(val_img)
     pred_img = model.unpatchify(pred)
 
     d_input = torch.cat([latent[:, :1], latent_pred], 1)
