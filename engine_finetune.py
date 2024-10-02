@@ -176,7 +176,7 @@ def calculate_cls_cls_attention(data_loader, model: MaskedAutoencoderViT, device
     cls_cls_attns = []
     with torch.no_grad():
         for (data, target) in tqdm(data_loader, desc="cls cls attn"):
-            latent, mask, ids_restore, (x_blocks, attns) = model.forward_encoder(data.to(device), mask_ratio=0)
+            latent, mask, ids_restore, attns = model.forward_encoder(data.to(device), mask_ratio=0)
 
             cls_cls_attn = attns[:, :, :, 0, 0].detach().cpu() # batch, blocks, heads
             cls_cls_attns.append(cls_cls_attn)
