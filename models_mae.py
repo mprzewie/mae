@@ -10,13 +10,13 @@
 # --------------------------------------------------------
 
 from functools import partial
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 import numpy as np
 import torch
 import torch.nn as nn
 
-from timm.models.vision_transformer import PatchEmbed, Block
+from timm.models.vision_transformer import PatchEmbed
 
 from util.pos_embed import get_2d_sincos_pos_embed
 from models_vit import Block
@@ -50,7 +50,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim),
                                       requires_grad=False)  # fixed sin-cos embedding
 
-        self.blocks = nn.ModuleList([
+        self.blocks: List[Block] = nn.ModuleList([
             Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for i in range(depth)
         ])
@@ -237,17 +237,17 @@ class MaskedAutoencoderViT(nn.Module):
 
         # apply Transformer blocks
         x_blocks = [x]
-        cls_cls_attns = []
+        # cls_cls_attns = []
         for blk in self.blocks:
-            x, attn, _ = blk(x, return_attention=True)
+            x, attn, _ = blk.forward(x, return_attention=True)
             x_blocks.append(x)
-            cls_cls_attns.append(attn[:, :, :1, :1])
+            # cls_cls_attns.append(attn[:, :, :1, :1])
 
         x = self.norm(x)
-        cls_cls_attns = torch.stack(cls_cls_attns, dim=1)
+        # cls_cls_attns = torch.stack(cls_cls_attns, dim=1)
         # batch, blocks, heads, 1, 1
 
-        return x, mask, ids_restore, (torch.stack(x_blocks), cls_cls_attns)
+        return x, mask, ids_restore, attn #(torch.stack(x_blocks), cls_cls_attns)
 
     def forward_decoder(self, x, ids_restore):
         # embed tokens
@@ -359,7 +359,9 @@ class MaskedAutoencoderViT(nn.Module):
         return new_latent
 
     def forward(self, imgs, mask_ratio=0.75):
-        latent, mask, ids_restore, (x_blocks, attn) = self.forward_encoder(imgs, mask_ratio)
+        latent, mask, ids_restore, attn = self.forward_encoder(imgs, mask_ratio)
+
+        # assert False, [attn.shape, x_blocks.shape]
         latent = self.cls_postprocessing(latent)
 
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
@@ -377,7 +379,7 @@ class MaskedAutoencoderViT(nn.Module):
             cls_feats = cls_feats[:, 0]
         outputs = self.fc(cls_feats.detach())
 
-        return mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred)
+        return mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred, attn)
 
 
 def mae_vit_tiny_patch16_dec192d4b(img_size=224, patch_size=16, decoder_depth=4, **kwargs):

@@ -64,7 +64,7 @@ def train_one_epoch(model: MaskedAutoencoderViT,
                 enabled=args.amp != "none",
                 dtype=AMP_PRECISIONS[args.amp]
         ):
-            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(samples,
+            loss_mae, _, _, (cls_feats, outputs, latent, ids_restore, latent_pred, attn) = model.forward(samples,
                                                                                                    mask_ratio=args.mask_ratio)
 
             if args.umae_reg == 'none':
@@ -76,6 +76,18 @@ def train_one_epoch(model: MaskedAutoencoderViT,
 
             loss_latent = cls_pos_loss.forward(target_latent, latent_pred, epoch=epoch)
 
+            ######
+            cls_pos_attn = attn[:, :, :1, 1:]
+            denom = cls_pos_attn.sum(dim=3, keepdim=True)
+            cls_pos_attn = cls_pos_attn / (denom + 1e-6)
+            cls_pos_entropy = -(cls_pos_attn * (cls_pos_attn + 1e-6).log()).sum(dim=3).squeeze()
+            # assert False, [attn.shape, cls_pos_entropy.shape]
+            mean_entropy_per_sample = cls_pos_entropy.mean(dim=1)
+            mean_cls_pos_entropy = mean_entropy_per_sample.mean()
+            entropy_loss = ((mean_entropy_per_sample - args.entropy_target) ** 2).mean()
+            ######
+
+
             outputs_ce = outputs[targets >= 0]
             targets_ce = targets[targets >= 0]
 
@@ -84,12 +96,14 @@ def train_one_epoch(model: MaskedAutoencoderViT,
             else:
                 loss_ce = torch.tensor(0.).to(device)
 
-        loss = loss_mae + (args.lamb * loss_reg) + (args.lpred_lambda * loss_latent) + loss_ce
+        loss = loss_mae + (args.lamb * loss_reg) + (args.lpred_lambda * loss_latent) + (args.entropy_lambda * entropy_loss) + loss_ce
 
         loss_mae_value = loss_mae.item()
         loss_reg_value = loss_reg.item()
         loss_ce_value = loss_ce.item()
         loss_latent_value = loss_latent.item()
+        loss_entropy_value = entropy_loss.item()
+        cls_pos_entropy_value = mean_cls_pos_entropy.item()
         loss_value = loss.item()
         train_acc = (outputs.argmax(dim=1) == targets).float().mean()
 
@@ -107,6 +121,8 @@ def train_one_epoch(model: MaskedAutoencoderViT,
             loss_reg=loss_reg_value,
             loss_ce=loss_ce_value,
             loss_latent=loss_latent_value,
+            loss_entropy=loss_entropy_value,
+            cls_pos_entropy=cls_pos_entropy_value,
             train_acc=train_acc
         )
 
@@ -118,12 +134,15 @@ def train_one_epoch(model: MaskedAutoencoderViT,
         loss_reg_value_reduce = misc.all_reduce_mean(loss_reg_value)
         loss_ce_value_reduce = misc.all_reduce_mean(loss_ce_value)
         loss_latent_value_reduce = misc.all_reduce_mean(loss_latent_value)
+        loss_entropy_value_reduce = misc.all_reduce_mean(loss_entropy_value)
+        cls_pos_entropy_value_reduce = misc.all_reduce_mean(cls_pos_entropy_value)
         train_acc_reduce = misc.all_reduce_mean(train_acc)
 
         losses = {
             "value": loss_value_reduce,
             "mae": loss_mae_value_reduce,
             "reg": loss_reg_value_reduce,
+            "ent": loss_entropy_value_reduce,
             "ce": loss_ce_value_reduce,
         }
         assert not any([math.isnan(l) for l in losses.values()]), losses
@@ -138,6 +157,8 @@ def train_one_epoch(model: MaskedAutoencoderViT,
             log_writer.add_scalar('train_loss_reg', loss_reg_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_loss_ce', loss_ce_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_loss_latent', loss_latent_value_reduce, epoch_1000x)
+            log_writer.add_scalar('train_loss_entropy', loss_entropy_value_reduce, epoch_1000x)
+            log_writer.add_scalar('cls_pos_entropy', cls_pos_entropy_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_acc', train_acc_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
             log_writer.add_scalar("epoch", epoch, epoch_1000x)

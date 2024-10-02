@@ -125,7 +125,7 @@ def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer],
         with torch.cuda.amp.autocast():
             output = model.forward(images)
             if type(output) is tuple:
-                _, _, _, (_, output, _, _, _) = output
+                _, _, _, (_, output, _, _, _, _) = output
 
             loss = criterion(output, target)
 
