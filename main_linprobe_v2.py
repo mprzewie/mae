@@ -301,7 +301,7 @@ def main(args):
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print("Model = %s" % str(model_without_ddp))
+    # print("Model = %s" % str(model_without_ddp))
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
@@ -591,8 +591,8 @@ def collect_features(
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
 
-    attns_list = torch.cat(attns_list, dim=0) if shuffle_subsets == 1 else None
-    magns_list = torch.cat(magn_list, dim=0) if shuffle_subsets == 1 else None
+    attns_list = torch.cat(attns_list, dim=0)
+    magns_list = torch.cat(magn_list, dim=0)
 
     return features, labels, attns_list, magns_list
 
