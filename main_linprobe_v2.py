@@ -335,7 +335,7 @@ def main(args):
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)
 
-    if args.shuffle_subsets == 1 and wandb.run is not None:
+    if wandb.run is not None:
         L_test, Y_test, A_test, M_test = collect_features(
             model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
             return_features=args.cls_features
@@ -357,6 +357,9 @@ def main(args):
         pos_magnitude = mean_magn_stats[:, 1]
 
         stats_pf = "test_attn"
+        if args.shuffle_subsets > 1:
+            stats_pf = stats_pf + f"/ss{args.shuffle_subsets}"
+
         for b in range(len(cc_attns)):
             wandb.log({
                 f"{stats_pf}/cls_cls_attention": cc_attns[b],
@@ -572,9 +575,12 @@ def collect_features(
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
 
-            if shuffle_subsets == 1:
-                attns_list.append(attn_stats.detach().cpu())
-                magn_list.append(magn_stats.detach().cpu())
+            BSS, H, L, _ = attn_stats.shape
+            attn_stats = attn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, H, L, 8).mean(dim=1)
+            magn_stats = magn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, L, 2).mean(dim=1)
+
+            attns_list.append(attn_stats.detach().cpu())
+            magn_list.append(magn_stats.detach().cpu())
 
 
             # debugging only!
