@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
-
+import math
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 # --------------------------------------------------------
@@ -12,6 +12,7 @@
 from functools import partial
 from typing import Optional, Final, Type
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -204,6 +205,10 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         B, L, D = x_pos.shape
 
         noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
+        if shuffle_subsets == 1:
+            noise, _ = torch.sort(noise, dim=1)
+            # if we dont shuffle subsets, undo shuffling
+
         ids_shuffle = torch.argsort(noise, dim=1)
         x_pos_shuffled = torch.gather(x_pos, dim=1,index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
         x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
@@ -263,18 +268,30 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         x_cls = x_cls.mean(dim=1)
         x_pos = x_pos.mean(dim=1)
 
-        # ret = []
-
-        # x_cls = x[:, 0]
-
-        # x_pos = x[:, 1:].mean(dim=1)
-
         if return_features == "cls":
             ret = x_cls
         elif return_features == "pos":
             ret = x_pos
         elif return_features == "both":
             ret = torch.concat([x_cls, x_pos], dim=2)
+        elif return_features.startswith("cp"):
+            assert shuffle_subsets==1
+            cp = int(return_features.split("cp")[1])
+            B, SS, T1, D = x_n_s_cl_d.shape
+            x_n_cl_d = x_n_s_cl_d[:, 0]
+            fm = x_n_cl_d[:, 1:]
+            T = fm.shape[1]
+            hw = np.sqrt(T)
+            assert int(hw) == hw, hw
+            hw = int(hw)
+            c = hw // 2
+            s = c - math.ceil(cp/2)
+            e = c + math.floor(cp/2)
+            fm = fm.reshape(B, hw, hw, D)
+            fm = fm[:, s:e, s:e]
+            fm = fm.mean(dim=[1,2])
+            ret = fm
+
         else:
             raise NotImplementedError(return_features)
 
