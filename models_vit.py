@@ -189,6 +189,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
     def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls", return_final_attn: bool = False):
         # assert shuffle_subsets == 1, shuffle_subsets
+        orig_x = x
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -292,6 +293,23 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             fm = fm.mean(dim=[1,2])
             ret = fm
 
+        elif return_features == "dino":
+            assert shuffle_subsets == 1
+            x_n_cl_d = x_n_s_cl_d[:, 0]
+            fm = x_n_cl_d[:, 1:]
+
+            if orig_x.device==torch.device("cuda"):
+                _, _, _, d_attn = _DINO_cuda.forward_features(orig_x, return_final_attn=True)
+            else:
+                _, _, _, d_attn = _DINO_cpu.forward_features(orig_x,  return_final_attn=True)
+
+            d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
+            fm = fm.unsqueeze(1)
+
+            fm_mul = fm * d_attn
+
+            ret = fm_mul.mean(dim=[1,2])
+
         else:
             raise NotImplementedError(return_features)
 
@@ -302,8 +320,6 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             return ret, attentions, magnitudes, attn
 
         return ret, attentions, magnitudes
-
-        # return x_cls, x_pos
 
 
 
@@ -348,3 +364,27 @@ def vit_huge_patch14(**kwargs):
         patch_size=14, embed_dim=1280, depth=32, num_heads=16, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
+
+
+def _timm(name="vit_base_patch16_224.dino") -> VisionTransformer:
+    from timm.models.vision_transformer import _create_vision_transformer
+    checkpoint_model = _create_vision_transformer(name, pretrained=True, patch_size=16, embed_dim=768, depth=12,
+                                                  num_heads=12).state_dict()
+    model = vit_base_patch16()
+    state_dict = model.state_dict()
+    for k in ['head.weight', 'head.bias']:
+        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+            print(f"Removing key {k} from pretrained checkpoint")
+            del checkpoint_model[k]
+    from util.pos_embed import interpolate_pos_embed
+    interpolate_pos_embed(model, checkpoint_model)
+    msg = model.load_state_dict(checkpoint_model, strict=False)
+    print(name, msg)
+    return model
+
+_DINO_cpu = _timm()
+
+try:
+    _DINO_cuda = _timm().cuda()
+except:
+    print("Can't initialize dino cuda")
