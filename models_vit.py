@@ -187,7 +187,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         self.block_reshuffling = block_reshuffling
         assert not self.block_reshuffling
 
-    def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls"):
+    def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls", return_final_attn: bool = False):
         # assert shuffle_subsets == 1, shuffle_subsets
         B = x.shape[0]
         x = self.patch_embed(x)
@@ -297,6 +297,9 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
         attentions = torch.cat(attentions, dim=2) # kind, batch, blocks, heads, tokens
         magnitudes = torch.cat(magnitudes, dim=2) # kind, batch, blocks, tokens
+
+        if return_final_attn:
+            return ret, attentions, magnitudes, attn
 
         return ret, attentions, magnitudes
 
