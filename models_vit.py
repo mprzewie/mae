@@ -293,6 +293,27 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             fm = fm.mean(dim=[1,2])
             ret = fm
 
+        elif return_features.startswith("ca"):
+            assert shuffle_subsets==1
+            ca = int(return_features.split("ca")[1])
+            B, SS, T1, D = x_n_s_cl_d.shape
+            x_n_cl_d = x_n_s_cl_d[:, 0]
+            fm = x_n_cl_d[:, 1:]
+            T = fm.shape[1]
+            hw = np.sqrt(T)
+            assert int(hw) == hw, hw
+            hw = int(hw)
+            c = hw // 2
+            s = c - math.ceil(ca/2)
+            e = c + math.floor(ca/2)
+            # fm = fm.reshape(B, hw, hw, D)
+            attn = attn.mean(dim=1)[:, 1:, 1:].reshape(B, hw, hw, hw**2)
+            attn_ss = attn[:, s:e, s:e].mean(dim=[1,2])
+            attn_ss_denom = attn_ss.sum(dim=1, keepdim=True)
+            attn_ss = attn_ss / (attn_ss_denom + 1e-6)
+
+            ret = (fm * attn_ss.unsqueeze(2)).mean(dim=1)
+
         elif return_features == "dino":
             assert shuffle_subsets == 1
             x_n_cl_d = x_n_s_cl_d[:, 0]
