@@ -576,8 +576,8 @@ def collect_features(
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
 
-            BSS, H, L, _ = attn_stats.shape
-            attn_stats = attn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, H, L, 8).mean(dim=1)
+            BSS, L, H, _ = attn_stats.shape
+            attn_stats = attn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, L, H, 8).mean(dim=1)
             magn_stats = magn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, L, 2).mean(dim=1)
 
             attns_list.append(attn_stats.detach().cpu())
