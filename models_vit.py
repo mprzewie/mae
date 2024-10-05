@@ -319,10 +319,10 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             x_n_cl_d = x_n_s_cl_d[:, 0]
             fm = x_n_cl_d[:, 1:]
 
-            if orig_x.device==torch.device("cuda"):
-                _, _, _, d_attn = _DINO_cuda.forward_features(orig_x, return_final_attn=True)
+            if orig_x.device==torch.device("cpu"):
+                _, _, _, d_attn = _DINO_cpu.forward_features(orig_x, return_final_attn=True)
             else:
-                _, _, _, d_attn = _DINO_cpu.forward_features(orig_x,  return_final_attn=True)
+                _, _, _, d_attn = _DINO_cuda.forward_features(orig_x,  return_final_attn=True)
 
             d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
             fm = fm.unsqueeze(1)
