@@ -19,6 +19,7 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+from torch.optim import SGD
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -55,6 +56,7 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0 for linear probe following MoCo v1)')
+    parser.add_argument('--optimizer', type=str, default="lars", choices=['lars', 'sgd'])
 
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
@@ -270,7 +272,7 @@ def main(args):
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print("Model = %s" % str(model_without_ddp))
+    # print("Model = %s" % str(model_without_ddp))
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
@@ -288,7 +290,11 @@ def main(args):
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
-    optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if args.optimizer == "lars":
+        optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        optimizer = SGD(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
     print(optimizer)
     loss_scaler = NativeScaler()
 
