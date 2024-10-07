@@ -182,6 +182,9 @@ def main(args):
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
+    eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
+    args.eff_batch_size = eff_batch_size
+
     if global_rank == 0 and args.output_dir is not None and not args.eval:
         misc.maybe_setup_wandb( args.output_dir, args=args, job_type="linprobe_v1")
         os.makedirs(args.output_dir, exist_ok=True)
@@ -280,7 +283,7 @@ def main(args):
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
-    
+
     if args.lr is None:  # only base_lr is specified
         args.lr = args.blr * eff_batch_size / 256
 
