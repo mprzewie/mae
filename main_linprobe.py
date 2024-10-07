@@ -250,10 +250,14 @@ def main(args):
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
 
-        if args.global_pool:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        else:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+        # if args.global_pool:
+        #     assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
+        # else:
+
+        assert all([
+            k.startswith("head") or k.startswith("oracle")
+            for k in msg.missing_keys
+        ]), sorted(msg.missing_keys)
 
         # manually initialize fc layer: following MoCo v3
         # trunc_normal_(model.head.weight, std=0.01)
