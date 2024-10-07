@@ -31,6 +31,7 @@ from torchvision.datasets import STL10
 # from timm.models.layers import trunc_normal_
 
 import util.misc as misc
+from engine_pretrain import AMP_PRECISIONS
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.lars import LARS
@@ -119,6 +120,7 @@ def get_args_parser():
     parser.add_argument("--dataloader_affinity_hack", "-dlah",
                         action='store_true',
                         help="See: https://github.com/pytorch/pytorch/issues/101850#issuecomment-1717363898")
+    parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
 
 
     return parser

@@ -23,6 +23,7 @@ from tqdm import tqdm
 
 import util.misc as misc
 import util.lr_sched as lr_sched
+from engine_pretrain import AMP_PRECISIONS
 from models_mae import MaskedAutoencoderViT
 from models_vit import VisionTransformer
 
@@ -57,7 +58,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.cuda.amp.autocast(
+                enabled=args.amp != "none",
+                dtype=AMP_PRECISIONS[args.amp]
+        ):
             outputs = model(samples, return_features=args.cls_features)
             loss = criterion(outputs, targets)
             acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
