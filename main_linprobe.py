@@ -114,6 +114,10 @@ def get_args_parser():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
+    parser.add_argument("--dataloader_affinity_hack", "-dlah",
+                        action='store_true',
+                        help="See: https://github.com/pytorch/pytorch/issues/101850#issuecomment-1717363898")
+
 
     return parser
 
@@ -183,12 +187,16 @@ def main(args):
     else:
         log_writer = None
 
+    def worker_init_fn(worker_id):
+        os.sched_setaffinity(0, range(os.cpu_count()))
+
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
     data_loader_val = torch.utils.data.DataLoader(
@@ -196,7 +204,8 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
     model = models_vit.__dict__[args.model](
