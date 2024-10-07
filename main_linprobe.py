@@ -74,6 +74,10 @@ def get_args_parser():
     parser.set_defaults(global_pool=False)
     parser.add_argument('--cls_token', action='store_false', dest='global_pool',
                         help='Use class token instead of global pool for classification')
+    parser.add_argument("--cls_features",
+                        choices=["cls", "pos", "both", "cp1", "cp2", "cp3", "cp4", "ca1", "ca2", "ca3", "ca4", "dino"],
+                        default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--checkpoint_key", default="model", type=str)
 
     # Dataset parameters
     parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
@@ -152,7 +156,7 @@ def main(args):
     print(dataset_train)
     print(dataset_val)
 
-    if True:  # args.distributed:
+    if args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
         sampler_train = torch.utils.data.DistributedSampler(
@@ -173,7 +177,7 @@ def main(args):
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
     if global_rank == 0 and args.log_dir is not None and not args.eval:
-        misc.maybe_setup_wandb(args.log_dir, args=args, job_type="linprobe")
+        misc.maybe_setup_wandb(args.log_dir, args=args, job_type="linprobe_v1")
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir=args.log_dir)
     else:
@@ -197,14 +201,31 @@ def main(args):
 
     model = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
-        global_pool=args.global_pool,
+        global_pool=False, #args.global_pool,
     )
 
     if args.finetune and not args.eval:
-        checkpoint = torch.load(args.finetune, map_location='cpu')
+        # checkpoint = torch.load(args.finetune, map_location='cpu')
 
-        print("Load pre-trained checkpoint from: %s" % args.finetune)
-        checkpoint_model = checkpoint['model']
+        # print("Load pre-trained checkpoint from: %s" % args.finetune)
+        # checkpoint_model = checkpoint['model']
+        if Path(args.finetune).exists():
+            print("Interpreting", args.finetune, "as path")
+            checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+        else:
+            print("Interpreting", args.finetune, "as timm model")
+            from timm.models.vision_transformer import _create_vision_transformer
+
+            model_to_kwargs = {
+                "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
+                "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
+                "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
+                "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
+                "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
+            }
+            model_kwargs = model_to_kwargs[args.model]
+            checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_kwargs).state_dict()
+
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
@@ -286,10 +307,10 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        if args.output_dir:
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch)
+        # if args.output_dir:
+        #     misc.save_model(
+        #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+        #         loss_scaler=loss_scaler, epoch=epoch)
 
         test_stats = evaluate(data_loader_val, model, device)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
@@ -297,9 +318,9 @@ def main(args):
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
         if log_writer is not None:
-            log_writer.add_scalar('test_v1/test_acc1', test_stats['acc1'], epoch)
-            log_writer.add_scalar('test_v1/test_acc5', test_stats['acc5'], epoch)
-            log_writer.add_scalar('test_v1/test_loss', test_stats['loss'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc1', test_stats['acc1'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc5', test_stats['acc5'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_loss', test_stats['loss'], epoch)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         **{f'test_{k}': v for k, v in test_stats.items()},

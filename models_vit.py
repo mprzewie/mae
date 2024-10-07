@@ -168,6 +168,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             block_reshuffling: bool = False,
             global_pool=False,
             block_fn: Type[nn.Module]=Block,
+            oracle: bool = True,
             **kwargs
     ):
         super(VisionTransformer, self).__init__(block_fn=block_fn, **kwargs)
@@ -184,8 +185,12 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         self.head = nn.Linear(
             self.embed_dim * n_last_layers, self.num_classes
         )
-        self.block_reshuffling = block_reshuffling
-        assert not self.block_reshuffling
+
+        assert not block_reshuffling
+
+        self.oracle = _timm_oracle() if oracle else None
+
+
 
     def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls", return_final_attn: bool = False):
         # assert shuffle_subsets == 1, shuffle_subsets
@@ -319,10 +324,8 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             x_n_cl_d = x_n_s_cl_d[:, 0]
             fm = x_n_cl_d[:, 1:]
 
-            if orig_x.device==torch.device("cpu"):
-                _, _, _, d_attn = _DINO_cpu.forward_features(orig_x, return_final_attn=True)
-            else:
-                _, _, _, d_attn = _DINO_cuda.forward_features(orig_x,  return_final_attn=True)
+            with torch.no_grad():
+                _, _, _, d_attn = self.oracle.forward_features(orig_x, return_final_attn=True)
 
             d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
             fm = fm.unsqueeze(1)
@@ -387,11 +390,11 @@ def vit_huge_patch14(**kwargs):
     return model
 
 
-def _timm(name="vit_base_patch16_224.dino") -> VisionTransformer:
+def _timm_oracle(name="vit_base_patch16_224.dino") -> VisionTransformer:
     from timm.models.vision_transformer import _create_vision_transformer
     checkpoint_model = _create_vision_transformer(name, pretrained=True, patch_size=16, embed_dim=768, depth=12,
                                                   num_heads=12).state_dict()
-    model = vit_base_patch16()
+    model = vit_base_patch16(oracle=False)
     state_dict = model.state_dict()
     for k in ['head.weight', 'head.bias']:
         if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
@@ -403,9 +406,3 @@ def _timm(name="vit_base_patch16_224.dino") -> VisionTransformer:
     print(name, msg)
     return model
 
-_DINO_cpu = _timm()
-
-try:
-    _DINO_cuda = _timm().cuda()
-except:
-    print("Can't initialize dino cuda")
