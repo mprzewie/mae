@@ -104,7 +104,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer], device, *, return_targets_and_preds: bool = False):
+def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer], device, *, return_targets_and_preds: bool = False, cls_features: str = "cls"):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -123,9 +123,10 @@ def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer],
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model.forward(images)
-            if type(output) is tuple:
-                _, _, _, (_, output, _, _, _) = output
+            if isinstance(model, MaskedAutoencoderViT):
+                _, _, _, (_, output, _, _, _) = model.forward(images, cls_features)
+            else:
+                output = model.forward(images, return_features=cls_features)
 
             loss = criterion(output, target)
 
