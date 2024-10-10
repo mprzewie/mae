@@ -44,6 +44,7 @@ from torchvision.datasets import STL10
 from tqdm import tqdm
 
 import util.misc as misc
+from engine_pretrain import AMP_PRECISIONS
 from util.datasets import build_dataset_v2
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -142,6 +143,7 @@ def get_args_parser():
                         help='url used to set up distributed training')
     parser.add_argument("--attn_only", action="store_true", default=False)
     parser.add_argument("--draw_2d_embeddings", action="store_true", default=False)
+    parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
 
 
     return parser
@@ -341,10 +343,14 @@ def main(args):
         exit(0)
 
     if wandb.run is not None:
-        L_test, Y_test, A_test, M_test = collect_features(
-            model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
-            return_features=args.cls_features
-        )
+        with torch.cuda.amp.autocast(
+                enabled=args.amp != "none",
+                dtype=AMP_PRECISIONS[args.amp]
+        ):
+            L_test, Y_test, A_test, M_test = collect_features(
+                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
+                return_features=args.cls_features,
+            )
 
         mean_attn_stats = A_test.mean(dim=(0, 2))
         mean_magn_stats = M_test.mean(dim=0)
@@ -452,10 +458,19 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
 
         if epoch % args.aug_every == 0:
-            X_train, Y_train, _, _ = collect_features(
-                model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
-                return_features=args.cls_features
-            )
+
+            with torch.cuda.amp.autocast(
+                    enabled=args.amp != "none",
+                    dtype=AMP_PRECISIONS[args.amp]
+            ):
+                X_train, Y_train, _, _ = collect_features(
+                    model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
+                    return_features=args.cls_features
+                )
+                X_test, Y_test, A_test, M_test = collect_features(
+                    model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
+                    return_features=args.cls_features
+                )
 
             ds_train = TensorDataset(X_train, Y_train)
             dl_train = torch.utils.data.DataLoader(
@@ -466,10 +481,7 @@ def main(args):
                 drop_last=False,
             )
 
-            X_test, Y_test, A_test, M_test = collect_features(
-                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
-                return_features=args.cls_features
-            )
+
             ds_test = TensorDataset(X_test, Y_test)
             dl_val = torch.utils.data.DataLoader(
                 ds_test, shuffle=False,
@@ -540,7 +552,7 @@ def main(args):
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
-        device, shuffle_subsets: int, return_features: str, tqdm_desc: str = None,
+        device, shuffle_subsets: int, return_features: str, tqdm_desc: str = None
 ):
     model.eval()
     with torch.no_grad():
@@ -551,7 +563,11 @@ def collect_features(
 
 
         for i, (data, target) in enumerate(tqdm(loader, desc=tqdm_desc)):
-            z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
+            with torch.cuda.amp.autocast(
+                    enabled=args.amp != "none",
+                    dtype=AMP_PRECISIONS[args.amp]
+            ):
+                z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
 
             cls_cls_attns = attns[0, :, :, :, :1]
             pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)
