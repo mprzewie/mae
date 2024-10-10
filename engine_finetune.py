@@ -62,7 +62,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 enabled=args.amp != "none",
                 dtype=AMP_PRECISIONS[args.amp]
         ):
-            outputs = model(samples, return_features=args.cls_features)
+            if isinstance(model, VisionTransformer):
+                outputs = model(samples, return_features=args.cls_features)
+            else:
+                outputs = model(samples)
+
             loss = criterion(outputs, targets)
             acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
             metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
