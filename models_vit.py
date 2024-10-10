@@ -53,7 +53,7 @@ class Attention(nn.Module):
 
         self.cls_bias = None #torch.zeros(num_heads).cuda() if torch.cuda.is_available() else torch.zeros(num_heads)# TODO maybe a register
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, temperature: float=1) -> torch.Tensor:
         s0 = time()
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
@@ -69,6 +69,7 @@ class Attention(nn.Module):
         else:
             q = q * self.scale
             attn = q @ k.transpose(-2, -1)
+            attn = attn / temperature
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
 
@@ -142,8 +143,11 @@ class Block(nn.Module):
         self.ls2 = nn.Identity()
         self.drop_path2 = nn.Identity()
 
-    def forward(self, x: torch.Tensor, return_attention=False) -> torch.Tensor:
-        y, attention = self.attn(self.norm1(x))
+    def forward(self, x: torch.Tensor, *,
+                attn_temperature: float = 1,
+                return_attention=False
+                ) -> torch.Tensor:
+        y, attention = self.attn(self.norm1(x), temperature=attn_temperature)
 
         x_norm = torch.linalg.vector_norm(x, dim=2)
         y_norm = torch.linalg.vector_norm(y, dim=2)
@@ -192,7 +196,12 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
 
-    def forward_features(self, x, shuffle_subsets: int = 1, return_features: str = "cls", return_final_attn: bool = False):
+    def forward_features(
+            self, x, shuffle_subsets: int = 1, return_features: str = "cls",
+            *,
+            attn_temperature: float = 1.,
+            return_final_attn: bool = False,
+    ):
         # assert shuffle_subsets == 1, shuffle_subsets
         orig_x = x
         B = x.shape[0]
@@ -226,7 +235,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         attentions = []
         magnitudes = []
         for blk in self.blocks:
-            x, attn, magn = blk.forward(x, return_attention=True)
+            x, attn, magn = blk.forward(x, return_attention=True, attn_temperature=attn_temperature)
 
             _, _, T, T = attn.shape
             attn_range = torch.arange(T)
@@ -333,6 +342,28 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             fm_mul = fm * d_attn
 
             ret = fm_mul.mean(dim=[1,2])
+
+        elif return_features.startswith("attn"):
+            assert shuffle_subsets == 1
+            x_n_cl_d = x_n_s_cl_d[:, 0]
+            fm = x_n_cl_d[:, 1:]
+
+            _, kind = return_features.split("attn-")
+            # assert False, all_pos_attn_entropy.shape
+            cls_pos_attn_entropy = all_pos_attn_entropy[:, :, 0]
+            if kind == "lcte": # lowest class token entropy
+                min_entropy_map_ind = cls_pos_attn_entropy.argmin(dim=1)
+                min_entropy_map = attn[torch.arange(len(attn)), min_entropy_map_ind, 0, 1:].unsqueeze(2)
+                min_entropy_map = min_entropy_map / min_entropy_map.sum(dim=1, keepdim=True)
+
+                ret = (min_entropy_map * fm).sum(dim=2)
+
+            elif kind == "mc": # mean class token
+                mean_map = attn[:, :, 0, 1:].mean(dim=1)
+                mean_map = mean_map / mean_map.sum(dim=1, keepdim=True)
+                ret = (mean_map * fm).sum(dim=2)
+            else:
+                raise NotImplementedError(return_features)
 
         else:
             raise NotImplementedError(return_features)
