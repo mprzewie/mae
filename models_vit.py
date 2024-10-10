@@ -334,7 +334,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             fm = x_n_cl_d[:, 1:]
 
             with torch.no_grad():
-                _, _, _, d_attn = self.oracle.forward_features(orig_x, return_final_attn=True)
+                _, _, _, (d_attn, _) = self.oracle.forward_features(orig_x, return_final_attn=True)
 
             d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
             fm = fm.unsqueeze(1)
@@ -372,7 +372,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         magnitudes = torch.cat(magnitudes, dim=2) # kind, batch, blocks, tokens
 
         if return_final_attn:
-            return ret, attentions, magnitudes, attn
+            return ret, attentions, magnitudes, (attn, x_n_s_cl_d)
 
         return ret, attentions, magnitudes
 
