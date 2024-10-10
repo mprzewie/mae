@@ -358,7 +358,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
                 ret = (min_entropy_map * fm).sum(dim=2)
 
-            elif kind == "mc": # mean class token
+            elif kind == "mn": # mean class token
                 mean_map = attn[:, :, 0, 1:].mean(dim=1)
                 mean_map = mean_map / mean_map.sum(dim=1, keepdim=True)
                 ret = (mean_map * fm).sum(dim=2)
