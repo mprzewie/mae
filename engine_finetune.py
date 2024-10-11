@@ -133,8 +133,11 @@ def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer],
         with torch.cuda.amp.autocast():
             if isinstance(model, MaskedAutoencoderViT):
                 _, _, _, (_, output, _, _, _) = model.forward(images, cls_features)
-            else:
+            elif isinstance(model, VisionTransformer):
                 output = model.forward(images, return_features=cls_features)
+            else:
+                output = model.forward(images)
+
 
             loss = criterion(output, target)
 
