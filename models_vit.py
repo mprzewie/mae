@@ -356,12 +356,13 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
                 min_entropy_map = attn[torch.arange(len(attn)), min_entropy_map_ind, 0, 1:].unsqueeze(2)
                 min_entropy_map = min_entropy_map / min_entropy_map.sum(dim=1, keepdim=True)
 
-                ret = (min_entropy_map * fm).sum(dim=2)
+                ret = (min_entropy_map * fm).sum(dim=1)
 
             elif kind == "mn": # mean class token
                 mean_map = attn[:, :, 0, 1:].mean(dim=1).unsqueeze(2)
                 mean_map = mean_map / mean_map.sum(dim=1, keepdim=True)
-                ret = (mean_map * fm).sum(dim=2)
+                ret = (mean_map * fm).sum(dim=1)
+
             else:
                 raise NotImplementedError(return_features)
 
