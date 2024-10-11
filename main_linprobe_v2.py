@@ -100,11 +100,7 @@ def get_args_parser():
     parser.add_argument("--n_last_layers", type=int, default=1, help="Use activations from N last layers for classification")
     parser.add_argument("--shuffle_subsets", type=int, default=1, help="Shuffle positional tokens into N subsets during inference")
     parser.add_argument("--agg_method", choices=["rep", "log", "t1"], default="rep", help="representations / logits / take 1 of shuffled")
-    parser.add_argument("--cls_features", choices=[
-        "cls", "pos", "both", "cp1", "cp2", "cp3", "cp4", "ca1", "ca2", "ca3", "ca4",
-        "dino",
-        "attn-lcte", "attn-mn"
-    ],
+    parser.add_argument("--cls_features", choices=models_vit.CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
     parser.add_argument("--block_reshuffling", "--br", action="store_true", help="reshuffle pos tokens btw. blocks")
 

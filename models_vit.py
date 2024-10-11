@@ -22,6 +22,13 @@ import torch.nn.functional as F
 from time import time
 from pprint import pprint
 
+CLS_FT_CHOICES = [
+        "cls", "pos", "both",
+        "cp1", "cp2", "cp3", "cp4",
+        "ca1", "ca2", "ca3", "ca4",
+        "dino",
+        "attn-lcte", "attn-mn"
+    ]
 class Attention(nn.Module):
     fused_attn: Final[bool]
 

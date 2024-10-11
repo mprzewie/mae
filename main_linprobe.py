@@ -32,6 +32,7 @@ from torchvision.datasets import STL10
 
 import util.misc as misc
 from engine_pretrain import AMP_PRECISIONS
+from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.lars import LARS
@@ -78,7 +79,7 @@ def get_args_parser():
     parser.add_argument('--cls_token', action='store_false', dest='global_pool',
                         help='Use class token instead of global pool for classification')
     parser.add_argument("--cls_features",
-                        choices=["cls", "pos", "both", "cp1", "cp2", "cp3", "cp4", "ca1", "ca2", "ca3", "ca4", "dino"],
+                        choices=CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
     parser.add_argument("--checkpoint_key", default="model", type=str)
 
