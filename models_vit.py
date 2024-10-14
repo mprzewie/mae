@@ -212,7 +212,9 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             *,
             attn_temperature: float = 1.,
             return_final_attn: bool = False,
+            return_block: Optional[int] = None
     ):
+        return_block = return_block or len(self.blocks) - 1
         # assert shuffle_subsets == 1, shuffle_subsets
         orig_x = x
         B = x.shape[0]
@@ -245,7 +247,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
         attentions = []
         magnitudes = []
-        for blk in self.blocks:
+        for b_id, blk in enumerate(self.blocks):
             x, attn, magn = blk.forward(x, return_attention=True, attn_temperature=attn_temperature)
 
             _, _, T, T = attn.shape
@@ -272,6 +274,9 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             # assert False, attn_stats.shape
             attentions.append(attn_stats.detach())
             magnitudes.append(magn.unsqueeze(2).detach())
+
+            if b_id == return_block:
+                break
 
             # if self.block_reshuffling:
             #     x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L // shuffle_subsets) + 1, D)
@@ -467,8 +472,8 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
 
-    def forward(self, x: torch.Tensor, return_features: str = "cls") -> torch.Tensor:
-        x, attn, magnitudes = self.forward_features(x, return_features=return_features, shuffle_subsets=1)
+    def forward(self, x: torch.Tensor, return_features: str = "cls", return_block: Optional[int] = None) -> torch.Tensor:
+        x, attn, magnitudes = self.forward_features(x, return_features=return_features, shuffle_subsets=1, return_block=return_block)
         # x = x.mean(dim=1)  # account for shuffle subsets which is essentially a no-op in this case
         x = self.head(x)
         return x

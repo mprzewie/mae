@@ -26,6 +26,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision
 import wandb
+from pygments.lexer import default
 from sklearn.manifold import TSNE
 from timm.utils import accuracy
 from torch import nn, optim
@@ -102,6 +103,7 @@ def get_args_parser():
     parser.add_argument("--agg_method", choices=["rep", "log", "t1"], default="rep", help="representations / logits / take 1 of shuffled")
     parser.add_argument("--cls_features", choices=models_vit.CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--num_block", type=int, default=None)
     parser.add_argument("--block_reshuffling", "--br", action="store_true", help="reshuffle pos tokens btw. blocks")
 
     # Dataset parameters
@@ -461,11 +463,11 @@ def main(args):
             ):
                 X_train, Y_train, _, _ = collect_features(
                     model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
-                    return_features=args.cls_features
+                    return_features=args.cls_features, return_block=args.num_block,
                 )
                 X_test, Y_test, A_test, M_test = collect_features(
                     model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
-                    return_features=args.cls_features
+                    return_features=args.cls_features, return_block=args.num_block,
                 )
 
             ds_train = TensorDataset(X_train, Y_train)
@@ -511,6 +513,9 @@ def main(args):
         lin_pf = f"test_linear_{args.cls_features}"
         if args.shuffle_subsets > 1:
             lin_pf = f"{lin_pf}_ss{args.shuffle_subsets}"
+        if args.num_block is not None:
+            lin_pf = f"{lin_pf}_nb{args.num_block}"
+
 
         if log_writer is not None:
             log_writer.add_scalar(f'{lin_pf}/test_acc1', test_stats['acc1'], epoch)
@@ -548,7 +553,7 @@ def main(args):
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
-        device, shuffle_subsets: int, return_features: str, tqdm_desc: str = None
+        device, shuffle_subsets: int, return_features: str, return_block: int, tqdm_desc: str = None
 ):
     model.eval()
     with torch.no_grad():
@@ -563,7 +568,7 @@ def collect_features(
                     enabled=args.amp != "none",
                     dtype=AMP_PRECISIONS[args.amp]
             ):
-                z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
+                z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features, return_block=return_block)
 
             cls_cls_attns = attns[0, :, :, :, :1]
             pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)
