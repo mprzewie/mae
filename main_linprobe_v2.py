@@ -348,6 +348,7 @@ def main(args):
             L_test, Y_test, A_test, M_test = collect_features(
                 model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
                 return_features=args.cls_features,
+                return_block=None,
             )
 
         mean_attn_stats = A_test.mean(dim=(0, 2))
