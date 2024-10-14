@@ -33,7 +33,7 @@ def batch_ncut(patch_tokens, tau=0, eps=1e-5, im_name='', no_binary_graph=True):
     L = torch.linalg.cholesky(Be)
     L_inv = torch.linalg.inv(L)
     L_inv_T = L_inv.transpose(1, 2)
-    transformed_A = L_inv @ torch.tensor(Ae) @ L_inv_T
+    transformed_A = L_inv @ Ae @ L_inv_T
     with torch.cuda.amp.autocast(enabled=False):
         eigenvalues, eigenvectors_w = torch.linalg.eigh(transformed_A.float())
 
