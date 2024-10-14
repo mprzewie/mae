@@ -22,12 +22,16 @@ import torch.nn.functional as F
 from time import time
 from pprint import pprint
 
+from tokencut import batch_ncut
+
 CLS_FT_CHOICES = [
         "cls", "pos", "both",
         "cp1", "cp2", "cp3", "cp4",
         "ca1", "ca2", "ca3", "ca4",
         "dino",
-        "attn-lcte", "attn-mn"
+        "attn-lcte", "attn-mn",
+        "tcut-bip", "tcut-bip-f",
+        "tcut-eig", "tcut-eig-f",
     ]
 class Attention(nn.Module):
     fused_attn: Final[bool]
@@ -372,6 +376,83 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             else:
                 raise NotImplementedError(return_features)
+
+        elif return_features.startswith("tcut"):
+            assert shuffle_subsets == 1
+            x_n_cl_d = x_n_s_cl_d[:, 0]
+            fm = x_n_cl_d[:, 1:]
+            bipartition, eigen  = batch_ncut(fm)
+
+
+            # assert False, (fm.shape, bipartition.shape)
+            fg_bp = bipartition.unsqueeze(2)
+            # foreground tokens std
+            fg_fm = fm * fg_bp
+            fg_nums = fg_bp.sum(dim=1, keepdim=True)
+            fg_sum = fg_fm.sum(dim=1, keepdim=True)
+            fg_mean = fg_sum / (fg_nums + 1e-6)
+            fg_sd = (fg_fm - fg_mean) ** 2
+            fg_var = (fg_sd * fg_bp).sum(dim=1, keepdim=True) / (fg_nums + 1e-6)
+            fg_std = fg_var.sqrt()
+            fg_std_m = fg_std.mean(dim=2)
+            # background tokens std
+            bg_bp = (1 - bipartition).unsqueeze(2)
+            bg_fm = fm * bg_bp
+            bg_nums = bg_bp.sum(dim=1, keepdim=True)
+            bg_sum = bg_fm.sum(dim=1, keepdim=True)
+            bg_mean = bg_sum / (bg_nums + 1e-6)
+            bg_sd = (bg_fm - bg_mean) ** 2
+            bg_var = (bg_sd * bg_bp).sum(dim=1, keepdim=True)  / (bg_nums + 1e-6)
+            bg_std = bg_var.sqrt()
+            bg_std_m = bg_std.mean(dim=2)
+
+            if return_features.endswith("-f"):
+                flip = (bg_std_m > fg_std_m).squeeze()
+                bipartition[flip] = 1 - bipartition[flip]
+                eigen[flip] = -eigen[flip]
+
+            eigen = eigen - eigen.min(dim=1, keepdim=True)[0]
+
+            mul = bipartition if "bip" in return_features else eigen
+            mul = mul / (mul.sum(dim=1, keepdim=True) + 1e-6)
+            mul = mul.unsqueeze(2)
+
+            fm_mul = fm * mul
+            ret = fm_mul.sum(dim=1)
+
+
+            # bipartition_fm = bipartition.reshape(len(orig_x),14,14)
+            # eigen_fm = eigen.reshape(len(orig_x),14,14)
+            #
+            # # fg_t_std = masked_tensor(fm, fm==1).std(dim=1).mean(dim=1)
+            # # bg_t_std = masked_tensor(fm, fm==0).std(dim=1).mean(dim=1)
+            #
+            # # assert False, fg_t.shape
+            #
+            #
+            # # fg_std = fm[barr, bipartition_fm==1, :].std(dim=1, keepdim=True)
+            # # bg_std = fm[barr, bipartition_fm==0, :].std(dim=1, keepdim=True)
+            #
+            # # assert False, [fg_std.shape, bg_std.shape]
+            #
+            #
+            # import matplotlib.pyplot as plt
+            # rows, cols = (len(orig_x), 3)
+            #
+            # fig, ax = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2.5))
+            # for b in range(rows):
+            #     ax[b, 0].imshow(orig_x[b].permute(1,2,0).cpu() + 0.5)
+            #     ax[b, 1].imshow(bipartition_fm[b].cpu())
+            #     ax[b, 2].imshow(eigen_fm[b].cpu())
+            #     ax[b, 1].set_title(f"bp fgs {fg_std_m[b].item():.3}", fontsize="xx-small")
+            #     ax[b, 2].set_title(f"eig bgs {bg_std_m[b].item():.3}", fontsize="xx-small")
+            #
+            # plt.show()
+            # assert False
+
+
+            # assert False, (orig_x.shape, bipartition.shape, eigen.shape)
+
 
         else:
             raise NotImplementedError(return_features)
