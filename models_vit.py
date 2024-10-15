@@ -33,6 +33,10 @@ CLS_FT_CHOICES = [
         "tcut-bip", "tcut-bip-f",
         "tcut-eig", "tcut-eig-f",
     ]
+
+HUB_KEY_TO_URL = {
+    "hub_vit_base_patch16_224.mae_visualize":  "https://dl.fbaipublicfiles.com/mae/visualize/mae_visualize_vit_base.pth"
+}
 class Attention(nn.Module):
     fused_attn: Final[bool]
 

@@ -257,6 +257,16 @@ def main(args):
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
             checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+
+        elif args.finetune.startswith("hub"):
+            state_dict = torch.hub.load_state_dict_from_url(
+                url=models_vit.HUB_KEY_TO_URL[args.finetune],
+            )
+            state_dict = state_dict['model']
+            for k in list(state_dict.keys()):
+                if k.startswith('decoder') or k.startswith('mask_token'):
+                    del state_dict[k]
+            checkpoint_model = state_dict
         else:
             print("Interpreting", args.finetune, "as timm model")
             from timm.models.vision_transformer import _create_vision_transformer
