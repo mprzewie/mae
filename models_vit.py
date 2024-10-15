@@ -32,6 +32,8 @@ CLS_FT_CHOICES = [
         "attn-lcte", "attn-mn",
         "tcut-bip", "tcut-bip-f",
         "tcut-eig", "tcut-eig-f",
+        "tcut-eigbip", "tcut-eigbip-f",
+        "tcut-eigsft", "tcut-eigsft-f",
     ]
 
 HUB_KEY_TO_URL = {
