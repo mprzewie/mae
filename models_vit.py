@@ -422,7 +422,17 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             eigen = eigen - eigen.min(dim=1, keepdim=True)[0]
 
-            mul = bipartition if "bip" in return_features else eigen
+            eigen_softmax = torch.nn.functional.softmax(eigen / 0.005)
+
+            if "eigensft" in return_features:
+                mul = eigen_softmax
+            elif "eigenbip" in return_features:
+                mul = bipartition * eigen
+            elif "eigen" in return_features:
+                mul = eigen
+            elif "bip" in return_features:
+                mul = bipartition
+
             mul = mul / (mul.sum(dim=1, keepdim=True) + 1e-6)
             mul = mul.unsqueeze(2)
 
