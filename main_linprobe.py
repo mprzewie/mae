@@ -31,6 +31,7 @@ from torchvision.datasets import STL10
 # from timm.models.layers import trunc_normal_
 
 import util.misc as misc
+from abmilp import ABMILPHead
 from engine_pretrain import AMP_PRECISIONS
 from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
@@ -182,6 +183,7 @@ def main(args):
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
+        global_rank = 0
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
@@ -270,7 +272,14 @@ def main(args):
 
     # for linear prob only
     # hack: revise model's head with BN
-    model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+
+    if args.cls_features.startswith("abmilp"):
+        model.head = ABMILPHead(
+            dim=model.head.in_features,
+            self_attn=args.cls_features.endswith("-sa")
+        )
+    else:
+        model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
     # freeze all but the head
     for _, p in model.named_parameters():
         p.requires_grad = False
@@ -332,6 +341,7 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
+
         # if args.output_dir:
         #     misc.save_model(
         #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,

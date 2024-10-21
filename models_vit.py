@@ -25,7 +25,7 @@ from pprint import pprint
 from tokencut import batch_ncut
 
 CLS_FT_CHOICES = [
-        "cls", "pos", "both",
+        "cls", "pos", "both", "raw",
         "cp1", "cp2", "cp3", "cp4",
         "ca1", "ca2", "ca3", "ca4",
         "dino",
@@ -34,6 +34,7 @@ CLS_FT_CHOICES = [
         "tcut-eig", "tcut-eig-f",
         "tcut-eigbip", "tcut-eigbip-f",
         "tcut-eigsft", "tcut-eigsft-f",
+        "abmilp", "abmilp-sa"
     ]
 
 HUB_KEY_TO_URL = {
@@ -309,6 +310,11 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             ret = x_cls
         elif return_features == "pos":
             ret = x_pos
+
+        elif return_features == "raw":
+            assert shuffle_subsets == 1
+            ret = x_n_s_cl_d[:, 0]
+
         elif return_features == "both":
             ret = torch.concat([x_cls, x_pos], dim=2)
         elif return_features.startswith("cp"):
@@ -424,7 +430,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             eigen = eigen - eigen.min(dim=1, keepdim=True)[0]
 
-            eigen_softmax = torch.nn.functional.softmax(eigen / 0.005)
+            eigen_softmax = torch.nn.functional.softmax(eigen)
 
             method = return_features.split("-")[1]
             if method == "eigsft": # in return_features:
@@ -444,30 +450,33 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             fm_mul = fm * mul
             ret = fm_mul.sum(dim=1)
 
+            # mul_fm = mul.reshape(len(orig_x),14,14)
 
             # bipartition_fm = bipartition.reshape(len(orig_x),14,14)
-            # eigen_fm = eigen.reshape(len(orig_x),14,14)
-            #
-            # # fg_t_std = masked_tensor(fm, fm==1).std(dim=1).mean(dim=1)
-            # # bg_t_std = masked_tensor(fm, fm==0).std(dim=1).mean(dim=1)
-            #
-            # # assert False, fg_t.shape
-            #
-            #
-            # # fg_std = fm[barr, bipartition_fm==1, :].std(dim=1, keepdim=True)
-            # # bg_std = fm[barr, bipartition_fm==0, :].std(dim=1, keepdim=True)
-            #
-            # # assert False, [fg_std.shape, bg_std.shape]
-            #
-            #
+            # eigen_fm = eigen_softmax.reshape(len(orig_x),14,14)
+
+            # fg_t_std = masked_tensor(fm, fm==1).std(dim=1).mean(dim=1)
+            # bg_t_std = masked_tensor(fm, fm==0).std(dim=1).mean(dim=1)
+
+            # assert False, fg_t.shape
+
+
+            # fg_std = fm[barr, bipartition_fm==1, :].std(dim=1, keepdim=True)
+            # bg_std = fm[barr, bipartition_fm==0, :].std(dim=1, keepdim=True)
+
+            # assert False, [fg_std.shape, bg_std.shape]
+
+
             # import matplotlib.pyplot as plt
             # rows, cols = (len(orig_x), 3)
             #
             # fig, ax = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2.5))
             # for b in range(rows):
             #     ax[b, 0].imshow(orig_x[b].permute(1,2,0).cpu() + 0.5)
-            #     ax[b, 1].imshow(bipartition_fm[b].cpu())
-            #     ax[b, 2].imshow(eigen_fm[b].cpu())
+            #     ax[b, 1].imshow(mul_fm[b].cpu())
+            #     ax[b, 2].imshow(mul_fm[b].cpu())
+            #     import seaborn as sns
+            #     sns.heatmap(mul_fm[b].cpu(), ax=ax[b, 2])
             #     ax[b, 1].set_title(f"bp fgs {fg_std_m[b].item():.3}", fontsize="xx-small")
             #     ax[b, 2].set_title(f"eig bgs {bg_std_m[b].item():.3}", fontsize="xx-small")
             #
@@ -476,7 +485,6 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
             # assert False, (orig_x.shape, bipartition.shape, eigen.shape)
-
 
         else:
             raise NotImplementedError(return_features)
@@ -492,8 +500,12 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
     def forward(self, x: torch.Tensor, return_features: str = "cls", return_block: Optional[int] = None) -> torch.Tensor:
-        x, attn, magnitudes = self.forward_features(x, return_features=return_features, shuffle_subsets=1, return_block=return_block)
-        # x = x.mean(dim=1)  # account for shuffle subsets which is essentially a no-op in this case
+        if return_features == "abmilp":
+            return_features = "raw"
+
+        x, attn, magnitudes = self.forward_features(
+            x, return_features=return_features, shuffle_subsets=1, return_block=return_block
+        )
         x = self.head(x)
         return x
 
