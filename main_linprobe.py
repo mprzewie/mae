@@ -274,9 +274,13 @@ def main(args):
     # hack: revise model's head with BN
 
     if args.cls_features.startswith("abmilp"):
-        model.head = ABMILPHead(
-            dim=model.head.in_features,
-            self_attn=args.cls_features.endswith("-sa")
+        model.head = torch.nn.Sequential(
+            ABMILPHead(
+                dim=model.head.in_features,
+                self_attn=args.cls_features.endswith("-sa")
+            ),
+            torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+            model.head
         )
     else:
         model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
