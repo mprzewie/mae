@@ -500,7 +500,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
     def forward(self, x: torch.Tensor, return_features: str = "cls", return_block: Optional[int] = None) -> torch.Tensor:
-        if return_features == "abmilp":
+        if return_features.startswith("abmilp"):
             return_features = "raw"
 
         x, attn, magnitudes = self.forward_features(
