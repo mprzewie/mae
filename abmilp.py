@@ -9,7 +9,7 @@ from models_vit import Attention
 
 
 class ABMILPHead(nn.Module):
-    def __init__(self, dim: int, self_attn: bool = False):
+    def __init__(self, dim: int, self_attn: bool = False, activation: str= "tanh"):
         super().__init__()
 
         self.self_attn = Attention(dim) if self_attn else nn.Identity()
@@ -18,7 +18,7 @@ class ABMILPHead(nn.Module):
 
         self.attention = nn.Sequential(
             nn.Linear(dim, dim), # matrix V
-            nn.Tanh(),
+            (nn.Tanh() if activation == "tanh" else nn.ReLU()),
             nn.Linear(dim, self.ATTENTION_BRANCHES)
         )
 

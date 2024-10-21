@@ -82,6 +82,7 @@ def get_args_parser():
     parser.add_argument("--cls_features",
                         choices=CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh")
     parser.add_argument("--checkpoint_key", default="model", type=str)
 
     # Dataset parameters
@@ -277,7 +278,8 @@ def main(args):
         model.head = torch.nn.Sequential(
             ABMILPHead(
                 dim=model.head.in_features,
-                self_attn=args.cls_features.endswith("-sa")
+                self_attn=args.cls_features.endswith("-sa"),
+                activation=args.abmilp_act,
             ),
             torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
             model.head
@@ -346,10 +348,10 @@ def main(args):
             args=args
         )
 
-        # if args.output_dir:
-        #     misc.save_model(
-        #         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-        #         loss_scaler=loss_scaler, epoch=epoch)
+        if args.output_dir:
+            misc.save_model(
+                args=args, model=model, model_without_ddp=model_without_ddp.head, optimizer=optimizer,
+                loss_scaler=loss_scaler, epoch=epoch)
 
         test_stats = evaluate(data_loader_val, model, device, cls_features=args.cls_features)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
@@ -357,6 +359,8 @@ def main(args):
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
         if log_writer is not None:
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/train_acc1', train_stats['acc1'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/train_loss', train_stats['loss'], epoch)
             log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc1', test_stats['acc1'], epoch)
             log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc5', test_stats['acc5'], epoch)
             log_writer.add_scalar(f'test_v1_{args.cls_features}/test_loss', test_stats['loss'], epoch)
