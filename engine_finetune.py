@@ -19,6 +19,7 @@ from einops import rearrange
 
 from timm.data import Mixup
 from timm.utils import accuracy
+from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
 import util.misc as misc
@@ -62,7 +63,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 enabled=args.amp != "none",
                 dtype=AMP_PRECISIONS[args.amp]
         ):
-            if isinstance(model, VisionTransformer):
+            model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
+            if isinstance(model_wo_ddp, VisionTransformer):
                 outputs = model(samples, return_features=args.cls_features)
             else:
                 outputs = model(samples)
