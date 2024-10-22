@@ -33,7 +33,7 @@ class ABMILPHead(nn.Module):
             requires_grad=False
         )
 
-        self.self_attn = Attention(dim)
+        self.self_attn = Attention(dim) if self.self_attention_apply_to != "none" else nn.Identity()
 
 
         self.ATTENTION_BRANCHES = 1
