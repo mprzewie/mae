@@ -206,7 +206,10 @@ def main(args):
     args.eff_batch_size = eff_batch_size
 
     if global_rank == 0 and args.output_dir is not None and not args.eval:
-        misc.maybe_setup_wandb( args.output_dir, args=args, job_type="linprobe_v1")
+        misc.maybe_setup_wandb(
+            args.output_dir, args=args,
+            job_type="linprobe_v1", run_name_suffix=args.suffix
+        )
         os.makedirs(args.output_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir=args.output_dir)
     else:
