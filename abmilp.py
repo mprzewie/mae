@@ -1,38 +1,72 @@
 """
 Adapted from https://github.com/gmum/Kernel_SA-AbMILP
 """
+from typing import Optional, List
 
+import torch.nn
 import torch.nn as nn
 import torch.nn.functional as F
 
 from models_vit import Attention
+from util.pos_embed import get_2d_sincos_pos_embed
 
 
 class ABMILPHead(nn.Module):
-    def __init__(self, dim: int, self_attn: bool = False, activation: str= "tanh"):
+    def __init__(
+            self,
+            dim: int,
+            self_attention_apply_to: str = "none",
+            activation: str= "tanh",
+            depth: int = 2,
+            cond: Optional[List[str]] = None,
+            num_patches: Optional[int] = None,
+
+        ):
         super().__init__()
 
-        self.self_attn = Attention(dim) if self_attn else nn.Identity()
+        self.cond = cond or []
+        self.self_attention_apply_to = self_attention_apply_to
+        self.pos_embed = torch.nn.Parameter(
+            torch.from_numpy(
+                get_2d_sincos_pos_embed(dim, int(num_patches ** .5), cls_token=True)
+            ).float().unsqueeze(0),
+            requires_grad=False
+        )
+
+        self.self_attn = Attention(dim)
+
 
         self.ATTENTION_BRANCHES = 1
 
-        self.attention = nn.Sequential(
-            nn.Linear(dim, dim), # matrix V
-            (nn.Tanh() if activation == "tanh" else nn.ReLU()),
-            nn.Linear(dim, self.ATTENTION_BRANCHES)
-        )
+        attn_pred_layers = []
+        for i in range(depth-1):
+            attn_pred_layers.extend([
+                nn.Linear(dim, dim),
+                (nn.Tanh() if activation == "tanh" else nn.ReLU()),
+            ])
 
-    def forward(self, x):
+        attn_pred_layers.append(nn.Linear(dim, self.ATTENTION_BRANCHES))
+        self.attention_predictor = nn.Sequential(*attn_pred_layers)
+
+    def forward_with_attn_map(self, x):
         x_attn = self.self_attn(x)
         if isinstance(x_attn, tuple):
             x_attn = x_attn[0]
 
-        attn_w = self.attention(x_attn)
+        predictor_input = x_attn if self.self_attention_apply_to in ["map", "both"] else x
+        if "pe" in self.cond:
+            predictor_input = predictor_input + self.pos_embed
 
-        attn_sft = F.softmax(attn_w, dim=1)
+        attn_map = self.attention_predictor(predictor_input)
+        attn_map = F.softmax(attn_map, dim=1)
 
-        ret = (x_attn * attn_sft).sum(dim=1)
-        return ret
+        x_out = x_attn if self.self_attention_apply_to in ["both"] else x
+        out = (x_out * attn_map).sum(dim=1)
+        return out, attn_map
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out, _ = self.forward_with_attn_map(x)
+        return out
 
 
 

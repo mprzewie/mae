@@ -34,7 +34,7 @@ CLS_FT_CHOICES = [
         "tcut-eig", "tcut-eig-f",
         "tcut-eigbip", "tcut-eigbip-f",
         "tcut-eigsft", "tcut-eigsft-f",
-        "abmilp", "abmilp-sa",
+        "abmilp"
     ]
 
 HUB_KEY_TO_URL = {

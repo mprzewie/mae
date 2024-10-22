@@ -82,7 +82,6 @@ def get_args_parser():
     parser.add_argument("--cls_features",
                         choices=CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
-    parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh")
     parser.add_argument("--checkpoint_key", default="model", type=str)
 
     # Dataset parameters
@@ -124,6 +123,21 @@ def get_args_parser():
                         action='store_true',
                         help="See: https://github.com/pytorch/pytorch/issues/101850#issuecomment-1717363898")
     parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
+
+
+    ####
+    parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh",
+                        help="abmilp activation function"
+                        )
+    parser.add_argument("--abmilp_sa", choices=["none", "map", "both"], default="both",
+                        help="how to apply the self-attention in abmilp"
+                        )
+    parser.add_argument("--abmilp_depth", type=int, default=2, help="depth of abmilp head")
+
+    parser.add_argument("--abmilp_cond", type=str, nargs="*", choices=["pe"],
+                        help="what to condition abmilp with?")
+
+    parser.add_argument("--suffix", type=str, default="")
 
 
     return parser
@@ -219,7 +233,7 @@ def main(args):
         worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
-    model = models_vit.__dict__[args.model](
+    model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
         global_pool=False, #args.global_pool,
     )
@@ -275,12 +289,17 @@ def main(args):
     # hack: revise model's head with BN
 
     if args.cls_features.startswith("abmilp"):
-        model.head = torch.nn.Sequential(
-            ABMILPHead(
+        abmilp = ABMILPHead(
                 dim=model.head.in_features,
-                self_attn=args.cls_features.endswith("-sa"),
+                self_attention_apply_to=args.abmilp_sa,
                 activation=args.abmilp_act,
-            ),
+                depth=args.abmilp_depth,
+                cond=args.abmilp_cond,
+                num_patches=model.patch_embed.num_patches,
+
+            )
+        model.head = torch.nn.Sequential(
+            abmilp,
             torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
             model.head
         )
