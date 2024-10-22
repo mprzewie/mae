@@ -134,7 +134,7 @@ def get_args_parser():
                         )
     parser.add_argument("--abmilp_depth", type=int, default=2, help="depth of abmilp head")
 
-    parser.add_argument("--abmilp_cond", type=str, nargs="*", choices=["pe"],
+    parser.add_argument("--abmilp_cond", type=str, choices=["none", "pe"],
                         help="what to condition abmilp with?")
 
     parser.add_argument("--suffix", type=str, default="")

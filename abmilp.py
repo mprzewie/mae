@@ -18,13 +18,13 @@ class ABMILPHead(nn.Module):
             self_attention_apply_to: str = "none",
             activation: str= "tanh",
             depth: int = 2,
-            cond: Optional[List[str]] = None,
+            cond: str="none",
             num_patches: Optional[int] = None,
 
         ):
         super().__init__()
 
-        self.cond = cond or []
+        self.cond = cond
         self.self_attention_apply_to = self_attention_apply_to
         self.pos_embed = torch.nn.Parameter(
             torch.from_numpy(
@@ -54,7 +54,7 @@ class ABMILPHead(nn.Module):
             x_attn = x_attn[0]
 
         predictor_input = x_attn if self.self_attention_apply_to in ["map", "both"] else x
-        if "pe" in self.cond:
+        if self.cond == "pe":
             predictor_input = predictor_input + self.pos_embed
 
         attn_map = self.attention_predictor(predictor_input)
