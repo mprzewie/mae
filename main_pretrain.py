@@ -23,6 +23,7 @@ import torch.backends.cudnn as cudnn
 import torchvision
 import wandb
 from matplotlib import pyplot as plt
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -31,11 +32,13 @@ import timm
 
 import timm.optim.optim_factory as optim_factory
 from torchvision.datasets import STL10
+import wids
 
 import util.misc as misc
 from loss_func import ClsPosLoss
 from util.datasets import build_dataset_v2
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
+from util.wids_custom import DistributedChunkedSampler
 
 import models_mae
 
@@ -107,6 +110,9 @@ def get_args_parser():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
+    parser.add_argument("--dataloader_affinity_hack", "-dlah",
+                        action='store_true',
+                        help="See: https://github.com/pytorch/pytorch/issues/101850#issuecomment-1717363898")
 
     # new
     parser.add_argument('--decoder_depth', type=int, default=8)
@@ -115,6 +121,7 @@ def get_args_parser():
     parser.add_argument("--lpred_loss", type=str, default="mse", choices=["mse", "cos", "dino"])
     parser.add_argument("--lpred_lambda", type=float, default=0., help="weight of loss of latent prediction from cls token")
     # parser.add_argument("--lpred_no_detach", "-llndt", action="store_true", default=False, help="detach encoder tokens for latent prediction loss")
+    parser.add_argument("--enc_cls_postprocessing", "-ecp", choices=["none", "detach", "zero", "patchcond"], default="none")
     parser.add_argument("--latent_loss_detach_cls", "-lldc", action="store_true", default=False)
     parser.add_argument("--lpred_decoder_arch", "-lda", choices=["vit", "mlp"], default="vit")
     parser.add_argument("--lpred_decoder_depth", type=int, default=8)
@@ -155,24 +162,34 @@ def main(args):
     print(dataset_train)
     print(dataset_val)
 
-    if args.distributed:
-        num_tasks = misc.get_world_size()
-        global_rank = misc.get_rank()
+    num_tasks = misc.get_world_size()
+    global_rank = misc.get_rank()
+    
+    if args.wds:
+        sampler_train = DistributedChunkedSampler(dataset_train, shuffle=True)
+        sampler_val = DistributedChunkedSampler(dataset_val, shuffle=True)
+
+
+    elif args.distributed:
+        # num_tasks = misc.get_world_size()
+        # global_rank = misc.get_rank()
+
         sampler_train = torch.utils.data.DistributedSampler(
             dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
-        print("Sampler_train = %s" % str(sampler_train))
 
         sampler_val = torch.utils.data.DistributedSampler(
             dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True
         )
-        print("Sampler_val = %s" % str(sampler_val))
 
     else:
-        num_tasks = 1
-        global_rank = 0
+        # num_tasks = 1
+        # global_rank = 0
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.RandomSampler(dataset_val)
+
+    print(f"Sampler_val = {sampler_val}")
+    print(f"Sampler_train = {sampler_train}")
 
     eff_batch_size = args.batch_size * args.accum_iter * num_tasks
     args.eff_batch_size = eff_batch_size
@@ -186,6 +203,7 @@ def main(args):
     print("accumulate grad iterations: %d" % args.accum_iter)
     print("effective batch size: %d" % eff_batch_size)
 
+
     if global_rank == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
         misc.maybe_setup_wandb(args.log_dir, args=args, job_type="pretrain")
@@ -193,12 +211,16 @@ def main(args):
     else:
         log_writer = None
 
+    def worker_init_fn(worker_id):
+        os.sched_setaffinity(0, range(os.cpu_count()))
+
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
     data_loader_val = torch.utils.data.DataLoader(
@@ -206,7 +228,8 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
     size_patch_kwargs = dict()
@@ -228,13 +251,14 @@ def main(args):
         latent_cls_input=args.latent_cls_input,
         latent_decoder_embed_dim=args.lpred_decoder_embed_dim,
         latent_decoder_dropout_rate=args.lpred_decoder_dropout_rate,
+        enc_cls_postprocessing=args.enc_cls_postprocessing,
         **size_patch_kwargs
     )
 
     model.to(device)
 
     model_without_ddp: models_mae.MaskedAutoencoderViT = model
-    print("Model = %s" % str(model_without_ddp))
+    # print("Model = %s" % str(model_without_ddp))
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)

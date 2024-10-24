@@ -19,10 +19,12 @@ from einops import rearrange
 
 from timm.data import Mixup
 from timm.utils import accuracy
+from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
 import util.misc as misc
 import util.lr_sched as lr_sched
+from engine_pretrain import AMP_PRECISIONS
 from models_mae import MaskedAutoencoderViT
 from models_vit import VisionTransformer
 
@@ -57,8 +59,16 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
 
-        with torch.cuda.amp.autocast(enabled=False):
-            outputs = model(samples)
+        with torch.cuda.amp.autocast(
+                enabled=args.amp != "none",
+                dtype=AMP_PRECISIONS[args.amp]
+        ):
+            model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
+            if isinstance(model_wo_ddp, VisionTransformer):
+                outputs = model(samples, return_features=args.cls_features)
+            else:
+                outputs = model(samples)
+
             loss = criterion(outputs, targets)
             acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
             metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
@@ -104,7 +114,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer], device, *, return_targets_and_preds: bool = False):
+def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer], device, *, return_targets_and_preds: bool = False, cls_features: str = "cls"):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -123,9 +133,14 @@ def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer],
 
         # compute output
         with torch.cuda.amp.autocast():
-            output = model.forward(images)
-            if type(output) is tuple:
-                _, _, _, (_, output, _, _, _) = output
+            model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
+            if isinstance(model_wo_ddp, MaskedAutoencoderViT):
+                _, _, _, (_, output, _, _, _) = model.forward(images, cls_features)
+            elif isinstance(model_wo_ddp, VisionTransformer):
+                output = model.forward(images, return_features=cls_features)
+            else:
+                output = model.forward(images)
+
 
             loss = criterion(output, target)
 

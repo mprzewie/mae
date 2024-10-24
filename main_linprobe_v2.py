@@ -26,6 +26,8 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision
 import wandb
+from pygments.lexer import default
+from sklearn.manifold import TSNE
 from timm.utils import accuracy
 from torch import nn, optim
 from torch.utils.tensorboard import SummaryWriter
@@ -43,6 +45,7 @@ from torchvision.datasets import STL10
 from tqdm import tqdm
 
 import util.misc as misc
+from engine_pretrain import AMP_PRECISIONS
 from util.datasets import build_dataset_v2
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -99,7 +102,9 @@ def get_args_parser():
     parser.add_argument("--n_last_layers", type=int, default=1, help="Use activations from N last layers for classification")
     parser.add_argument("--shuffle_subsets", type=int, default=1, help="Shuffle positional tokens into N subsets during inference")
     parser.add_argument("--agg_method", choices=["rep", "log", "t1"], default="rep", help="representations / logits / take 1 of shuffled")
-    parser.add_argument("--cls_features", choices=["cls", "pos", "both"], default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--cls_features", choices=models_vit.CLS_FT_CHOICES,
+                        default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--num_block", type=int, default=None)
     parser.add_argument("--block_reshuffling", "--br", action="store_true", help="reshuffle pos tokens btw. blocks")
 
     # Dataset parameters
@@ -136,6 +141,8 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
     parser.add_argument("--attn_only", action="store_true", default=False)
+    parser.add_argument("--draw_2d_embeddings", action="store_true", default=False)
+    parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
 
 
     return parser
@@ -166,25 +173,33 @@ def main(args):
 
     args.distributed = False
     args.gpu = 0
-    if args.distributed:
-        num_tasks = misc.get_world_size()
-        global_rank = misc.get_rank()
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
-        print("Sampler_train = %s" % str(sampler_train))
-        if args.dist_eval:
-            if len(dataset_val) % num_tasks != 0:
-                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
-                      'equal num of samples per-process.')
-            sampler_val = torch.utils.data.DistributedSampler(
-                dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-        else:
-            sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    global_rank = 0
+
+    if args.wds:
+        from util.wids_custom import DistributedChunkedSampler
+        sampler_train = DistributedChunkedSampler(dataset_train, shuffle=True)
+        sampler_val = DistributedChunkedSampler(dataset_val, shuffle=False)
+    # elif args.distributed:
+    #     num_tasks = misc.get_world_size()
+    #     global_rank = misc.get_rank()
+    #     sampler_train = torch.utils.data.DistributedSampler(
+    #         dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+    #     )
+    #     if args.dist_eval:
+    #         if len(dataset_val) % num_tasks != 0:
+    #             print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+    #                   'This will slightly alter validation results as extra duplicate entries are added to achieve '
+    #                   'equal num of samples per-process.')
+    #         sampler_val = torch.utils.data.DistributedSampler(
+    #             dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
+    #     else:
+    #         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+
+    print("Sampler_train = %s" % str(sampler_train))
+    print("Sampler_val = %s" % str(sampler_train))
 
     if (not args.distributed or (global_rank == 0)) and args.output_dir is not None and not args.eval:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -196,9 +211,8 @@ def main(args):
 
     # assert False, (len(dataset_train), len(dataset_val))
     data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
-        # batch_size=12,
-        # batch_size=512,
+        dataset_train,
+        sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -206,9 +220,8 @@ def main(args):
     )
 
     data_loader_val = torch.utils.data.DataLoader(
-        dataset_val, sampler=sampler_val,
-        # batch_size=12,
-        # batch_size=512,
+        dataset_val,
+        sampler=sampler_val,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
@@ -249,6 +262,16 @@ def main(args):
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
             checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+
+        elif args.finetune.startswith("hub"):
+            state_dict = torch.hub.load_state_dict_from_url(
+                url=models_vit.HUB_KEY_TO_URL[args.finetune],
+            )
+            state_dict = state_dict['model']
+            for k in list(state_dict.keys()):
+                if k.startswith('decoder') or k.startswith('mask_token'):
+                    del state_dict[k]
+            checkpoint_model = state_dict
         else:
             print("Interpreting", args.finetune, "as timm model")
             from timm.models.vision_transformer import _create_vision_transformer
@@ -298,7 +321,8 @@ def main(args):
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print("Model = %s" % str(model_without_ddp.__class__))
+    # print("Model = %s" % str(model_without_ddp))
+
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
@@ -332,29 +356,36 @@ def main(args):
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         exit(0)
 
-    _, _, A_test, M_test = collect_features(
-        model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
-        return_features=args.cls_features
-    )
-
-    mean_attn_stats = A_test.mean(dim=(0, 2))
-    mean_magn_stats = M_test.mean(dim=0)
-
-
-    cc_attns = mean_attn_stats[:, 0]
-    pos_self_attns = mean_attn_stats[:, 1]
-    cc_attns_adj = mean_attn_stats[:, 2]
-    pos_self_attns_adj = mean_attn_stats[:, 3]
-    cls_pos_attns = mean_attn_stats[:, 4] # should complement the cls cls attention
-    pos_cls_attns = mean_attn_stats[:, 5]
-    cls_pos_entropy = mean_attn_stats[:, 6]
-    pos_pos_entropy = mean_attn_stats[:, 7]
-    cls_magnitude = mean_magn_stats[:, 0]
-    pos_magnitude = mean_magn_stats[:, 1]
-
-
-    stats_pf = "test_attn"
     if wandb.run is not None:
+        with torch.cuda.amp.autocast(
+                enabled=args.amp != "none",
+                dtype=AMP_PRECISIONS[args.amp]
+        ):
+            L_test, Y_test, A_test, M_test = collect_features(
+                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
+                return_features=args.cls_features,
+                return_block=None,
+            )
+
+        mean_attn_stats = A_test.mean(dim=(0, 2))
+        mean_magn_stats = M_test.mean(dim=0)
+
+
+        cc_attns = mean_attn_stats[:, 0]
+        pos_self_attns = mean_attn_stats[:, 1]
+        cc_attns_adj = mean_attn_stats[:, 2]
+        pos_self_attns_adj = mean_attn_stats[:, 3]
+        cls_pos_attns = mean_attn_stats[:, 4] # should complement the cls cls attention
+        pos_cls_attns = mean_attn_stats[:, 5]
+        cls_pos_entropy = mean_attn_stats[:, 6]
+        pos_pos_entropy = mean_attn_stats[:, 7]
+        cls_magnitude = mean_magn_stats[:, 0]
+        pos_magnitude = mean_magn_stats[:, 1]
+
+        stats_pf = "test_attn"
+        if args.shuffle_subsets > 1:
+            stats_pf = stats_pf + f"/ss{args.shuffle_subsets}"
+
         for b in range(len(cc_attns)):
             wandb.log({
                 f"{stats_pf}/cls_cls_attention": cc_attns[b],
@@ -370,56 +401,70 @@ def main(args):
                 f"{stats_pf}/vit_block": b,
             })
 
+        tsne = TSNE()
+        latent_2d = tsne.fit_transform(L_test.numpy())
+        Y_test = Y_test.numpy()
+        fig, ax = plt.subplots()
+
+        for label in range(10):
+            l_subset = latent_2d[Y_test == label][:25]
+            ax.scatter(l_subset[:, 0], l_subset[:, 1], label=label)
+
+        ax.legend()
+        wandb.log(
+            {"monitoring/tsne": fig}
+        )
+
     if args.attn_only:
         exit(0)
 
-    _, _, A_train, _ = collect_features(
-        model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
-        return_features=args.cls_features
-    )
-
-    cca = A_train[:, :, :, 0].mean(dim=0)
-    ccs = A_train[:, :, :, 0].std(dim=0)
-
-    cca_mean = cca.mean(dim=1)
-    n_blocks = len(model_without_ddp.blocks)
-    target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
-
-    if args.cca_bias.startswith("linear"):
-        cca_biases = target_cca.unsqueeze(1) - cca
-
-        if "clamp_ceil" in args.cca_bias:
-            cca_biases = cca_biases.clamp(max=0)
-
-        for bi in range(n_blocks):
-            model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
-
-    elif args.cca_bias != "none":
-        raise NotImplementedError(args.cca_bias)
-
-    if args.cca_bias != "none":
-        _, _, A_train, _ = collect_features(
-            model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
-            return_features=args.cls_features
-        )
-
-    cca2 = A_train[:, :, :, 0].mean(dim=0)
-    cca_mean2 = cca2.mean(dim=1)
-
-    fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
-    for h in range(cca.shape[1]):
-        ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
-        ax[h].plot(cca_mean, color="red", label=f"mean cca before")
-        ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
-        ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
-        ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
-        ax[h].set_title(f"Head {h}")
-        ax[h].set_xlabel("VIT Block")
-        ax[h].set_ylim(-0.1, 1.2)
-        ax[0].legend(ncols=5)
-
-    if wandb.run is not None:
-        wandb.log({"monitoring/cca_bias": fig})
+    # _, _, A_train, _ = collect_features(
+    #     model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
+    #     return_features=args.cls_features
+    # )
+    #
+    # cca = A_train[:, :, :, 0].mean(dim=0)
+    # ccs = A_train[:, :, :, 0].std(dim=0)
+    #
+    # cca_mean = cca.mean(dim=1)
+    # n_blocks = len(model_without_ddp.blocks)
+    # target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
+    #
+    # if args.cca_bias.startswith("linear"):
+    #     cca_biases = target_cca.unsqueeze(1) - cca
+    #
+    #     if "clamp_ceil" in args.cca_bias:
+    #         cca_biases = cca_biases.clamp(max=0)
+    #
+    #     for bi in range(n_blocks):
+    #         model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
+    #
+    # elif args.cca_bias != "none":
+    #     raise NotImplementedError(args.cca_bias)
+    #
+    # if args.cca_bias != "none":
+    #     _, _, A_train, _ = collect_features(
+    #         model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
+    #         return_features=args.cls_features
+    #     )
+    #
+    # cca2 = A_train[:, :, :, 0].mean(dim=0)
+    # cca_mean2 = cca2.mean(dim=1)
+    #
+    # fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
+    # for h in range(cca.shape[1]):
+    #     ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
+    #     ax[h].plot(cca_mean, color="red", label=f"mean cca before")
+    #     ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
+    #     ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
+    #     ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
+    #     ax[h].set_title(f"Head {h}")
+    #     ax[h].set_xlabel("VIT Block")
+    #     ax[h].set_ylim(-0.1, 1.2)
+    #     ax[0].legend(ncols=5)
+    #
+    # if wandb.run is not None:
+    #     wandb.log({"monitoring/cca_bias": fig})
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
@@ -428,10 +473,20 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
 
         if epoch % args.aug_every == 0:
-            X_train, Y_train, _, _ = collect_features(
-                model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
-                return_features=args.cls_features
-            )
+
+            with torch.cuda.amp.autocast(
+                    enabled=args.amp != "none",
+                    dtype=AMP_PRECISIONS[args.amp]
+            ):
+                X_train, Y_train, _, _ = collect_features(
+                    model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
+                    return_features=args.cls_features, return_block=args.num_block,
+                )
+                X_test, Y_test, A_test, M_test = collect_features(
+                    model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
+                    return_features=args.cls_features, return_block=args.num_block,
+                )
+
             ds_train = TensorDataset(X_train, Y_train)
             dl_train = torch.utils.data.DataLoader(
                 ds_train, shuffle=True,
@@ -441,10 +496,7 @@ def main(args):
                 drop_last=False,
             )
 
-            X_test, Y_test, A_test, M_test = collect_features(
-                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
-                return_features=args.cls_features
-            )
+
             ds_test = TensorDataset(X_test, Y_test)
             dl_val = torch.utils.data.DataLoader(
                 ds_test, shuffle=False,
@@ -476,6 +528,12 @@ def main(args):
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
         lin_pf = f"test_linear_{args.cls_features}"
+        if args.shuffle_subsets > 1:
+            lin_pf = f"{lin_pf}_ss{args.shuffle_subsets}"
+        if args.num_block is not None:
+            lin_pf = f"{lin_pf}_nb{args.num_block}"
+
+
         if log_writer is not None:
             log_writer.add_scalar(f'{lin_pf}/test_acc1', test_stats['acc1'], epoch)
             log_writer.add_scalar(f'{lin_pf}/test_acc5', test_stats['acc5'], epoch)
@@ -495,13 +553,14 @@ def main(args):
             with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
-    outputs = {
-        "targets": test_targets,
-        "preds": test_preds,
-        "attentions": A_test,
-        "magnitudes": M_test,
-    }
-    torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
+    if args.shuffle_subsets == 1:
+        outputs = {
+            "targets": test_targets,
+            "preds": test_preds,
+            "attentions": A_test,
+            "magnitudes": M_test,
+        }
+        torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -511,7 +570,7 @@ def main(args):
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
-        device, shuffle_subsets: int, return_features: str, tqdm_desc: str = None,
+        device, shuffle_subsets: int, return_features: str, return_block: int, tqdm_desc: str = None
 ):
     model.eval()
     with torch.no_grad():
@@ -522,7 +581,11 @@ def collect_features(
 
 
         for i, (data, target) in enumerate(tqdm(loader, desc=tqdm_desc)):
-            z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features)
+            with torch.cuda.amp.autocast(
+                    enabled=args.amp != "none",
+                    dtype=AMP_PRECISIONS[args.amp]
+            ):
+                z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features, return_block=return_block)
 
             cls_cls_attns = attns[0, :, :, :, :1]
             pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)
@@ -550,6 +613,11 @@ def collect_features(
 
             features.append(z.detach().cpu())
             labels.append(target.detach().short().cpu())
+
+            BSS, L, H, _ = attn_stats.shape
+            attn_stats = attn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, L, H, 8).mean(dim=1)
+            magn_stats = magn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, L, 2).mean(dim=1)
+
             attns_list.append(attn_stats.detach().cpu())
             magn_list.append(magn_stats.detach().cpu())
 
@@ -561,6 +629,7 @@ def collect_features(
 
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
+
     attns_list = torch.cat(attns_list, dim=0)
     magns_list = torch.cat(magn_list, dim=0)
 

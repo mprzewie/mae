@@ -19,6 +19,7 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+from torch.optim import SGD
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -30,6 +31,9 @@ from torchvision.datasets import STL10
 # from timm.models.layers import trunc_normal_
 
 import util.misc as misc
+from abmilp import ABMILPHead
+from engine_pretrain import AMP_PRECISIONS
+from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.lars import LARS
@@ -55,6 +59,7 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0 for linear probe following MoCo v1)')
+    parser.add_argument('--optimizer', type=str, default="lars", choices=['lars', 'sgd'])
 
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
@@ -74,17 +79,21 @@ def get_args_parser():
     parser.set_defaults(global_pool=False)
     parser.add_argument('--cls_token', action='store_false', dest='global_pool',
                         help='Use class token instead of global pool for classification')
+    parser.add_argument("--cls_features",
+                        choices=CLS_FT_CHOICES,
+                        default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--checkpoint_key", default="model", type=str)
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
+    parser.add_argument('--data_path', default=Path('/datasets01/imagenet_full_size/061417/'), type=Path,
                         help='dataset path')
     parser.add_argument('--nb_classes', default=1000, type=int,
                         help='number of the classification types')
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--log_dir', default='./output_dir',
-                        help='path where to tensorboard log')
+    # parser.add_argument('--log_dir', default='./output_dir',
+    #                     help='path where to tensorboard log')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
@@ -110,6 +119,26 @@ def get_args_parser():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
+    parser.add_argument("--dataloader_affinity_hack", "-dlah",
+                        action='store_true',
+                        help="See: https://github.com/pytorch/pytorch/issues/101850#issuecomment-1717363898")
+    parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
+
+
+    ####
+    parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh",
+                        help="abmilp activation function"
+                        )
+    parser.add_argument("--abmilp_sa", choices=["none", "map", "both"], default="both",
+                        help="how to apply the self-attention in abmilp"
+                        )
+    parser.add_argument("--abmilp_depth", type=int, default=2, help="depth of abmilp head")
+
+    parser.add_argument("--abmilp_cond", type=str, choices=["none", "pe"],
+                        help="what to condition abmilp with?")
+
+    parser.add_argument("--suffix", type=str, default="")
+
 
     return parser
 
@@ -152,7 +181,7 @@ def main(args):
     print(dataset_train)
     print(dataset_val)
 
-    if True:  # args.distributed:
+    if args.distributed:
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
         sampler_train = torch.utils.data.DistributedSampler(
@@ -169,15 +198,25 @@ def main(args):
         else:
             sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
+        global_rank = 0
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    if global_rank == 0 and args.log_dir is not None and not args.eval:
-        misc.maybe_setup_wandb(args.log_dir, args=args, job_type="linprobe")
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = SummaryWriter(log_dir=args.log_dir)
+    eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
+    args.eff_batch_size = eff_batch_size
+
+    if global_rank == 0 and args.output_dir is not None and not args.eval:
+        misc.maybe_setup_wandb(
+            args.output_dir, args=args,
+            job_type="linprobe_v1", run_name_suffix=args.suffix
+        )
+        os.makedirs(args.output_dir, exist_ok=True)
+        log_writer = SummaryWriter(log_dir=args.output_dir)
     else:
         log_writer = None
+
+    def worker_init_fn(worker_id):
+        os.sched_setaffinity(0, range(os.cpu_count()))
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -185,6 +224,7 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
     data_loader_val = torch.utils.data.DataLoader(
@@ -192,19 +232,37 @@ def main(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
 
-    model = models_vit.__dict__[args.model](
+    model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
         num_classes=args.nb_classes,
-        global_pool=args.global_pool,
+        global_pool=False, #args.global_pool,
     )
 
     if args.finetune and not args.eval:
-        checkpoint = torch.load(args.finetune, map_location='cpu')
+        # checkpoint = torch.load(args.finetune, map_location='cpu')
 
-        print("Load pre-trained checkpoint from: %s" % args.finetune)
-        checkpoint_model = checkpoint['model']
+        # print("Load pre-trained checkpoint from: %s" % args.finetune)
+        # checkpoint_model = checkpoint['model']
+        if Path(args.finetune).exists():
+            print("Interpreting", args.finetune, "as path")
+            checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+        else:
+            print("Interpreting", args.finetune, "as timm model")
+            from timm.models.vision_transformer import _create_vision_transformer
+
+            model_to_kwargs = {
+                "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
+                "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
+                "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
+                "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
+                "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
+            }
+            model_kwargs = model_to_kwargs[args.model]
+            checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_kwargs).state_dict()
+
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
             if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
@@ -218,17 +276,38 @@ def main(args):
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
 
-        if args.global_pool:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        else:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+        # if args.global_pool:
+        #     assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
+        # else:
+
+        assert all([
+            k.startswith("head") or k.startswith("oracle")
+            for k in msg.missing_keys
+        ]), sorted(msg.missing_keys)
 
         # manually initialize fc layer: following MoCo v3
         # trunc_normal_(model.head.weight, std=0.01)
 
     # for linear prob only
     # hack: revise model's head with BN
-    model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+
+    if args.cls_features.startswith("abmilp"):
+        abmilp = ABMILPHead(
+                dim=model.head.in_features,
+                self_attention_apply_to=args.abmilp_sa,
+                activation=args.abmilp_act,
+                depth=args.abmilp_depth,
+                cond=args.abmilp_cond,
+                num_patches=model.patch_embed.num_patches,
+
+            )
+        model.head = torch.nn.Sequential(
+            abmilp,
+            torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+            model.head
+        )
+    else:
+        model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
     # freeze all but the head
     for _, p in model.named_parameters():
         p.requires_grad = False
@@ -240,11 +319,11 @@ def main(args):
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print("Model = %s" % str(model_without_ddp))
+    # print("Model = %s" % str(model_without_ddp))
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
-    
+
     if args.lr is None:  # only base_lr is specified
         args.lr = args.blr * eff_batch_size / 256
 
@@ -258,7 +337,11 @@ def main(args):
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
-    optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if args.optimizer == "lars":
+        optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        optimizer = SGD(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
     print(optimizer)
     loss_scaler = NativeScaler()
 
@@ -286,31 +369,35 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
+        test_stats = evaluate(data_loader_val, model, device, cls_features=args.cls_features)
+
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()},
+                     'epoch': epoch,
+                     'n_parameters': n_parameters}
         if args.output_dir:
             misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch)
+                args=args, model=model, model_without_ddp=model_without_ddp.head, optimizer=optimizer,
+                loss_scaler=loss_scaler, epoch=epoch, test_stats=log_stats,)
 
-        test_stats = evaluate(data_loader_val, model, device)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')
 
         if log_writer is not None:
-            log_writer.add_scalar('test_v1/test_acc1', test_stats['acc1'], epoch)
-            log_writer.add_scalar('test_v1/test_acc5', test_stats['acc5'], epoch)
-            log_writer.add_scalar('test_v1/test_loss', test_stats['loss'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/train_acc1', train_stats['acc1'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/train_loss', train_stats['loss'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc1', test_stats['acc1'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc5', test_stats['acc5'], epoch)
+            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_loss', test_stats['loss'], epoch)
 
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                        **{f'test_{k}': v for k, v in test_stats.items()},
-                        'epoch': epoch,
-                        'n_parameters': n_parameters}
 
-        if args.output_dir and misc.is_main_process():
-            if log_writer is not None:
-                log_writer.flush()
-            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_stats) + "\n")
+
+        # if args.output_dir and misc.is_main_process():
+        #     if log_writer is not None:
+        #         log_writer.flush()
+        #     with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
+        #         f.write(json.dumps(log_stats) + "\n")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
