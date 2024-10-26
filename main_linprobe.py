@@ -27,6 +27,7 @@ import torchvision.datasets as datasets
 import timm
 from torchvision.datasets import STL10
 
+import models_simmim
 # assert timm.__version__ == "0.3.2" # version check
 # from timm.models.layers import trunc_normal_
 
@@ -126,6 +127,8 @@ def get_args_parser():
 
 
     ####
+    parser.add_argument("--simmim", action="store_true", default=False)
+
     parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh",
                         help="abmilp activation function"
                         )
@@ -136,6 +139,8 @@ def get_args_parser():
 
     parser.add_argument("--abmilp_cond", type=str, choices=["none", "pe"],
                         help="what to condition abmilp with?")
+
+    parser.add_argument("--abmilp_content", type=str, choices=["all", "patch"], default="all")
 
     parser.add_argument("--suffix", type=str, default="")
 
@@ -235,13 +240,17 @@ def main(args):
         drop_last=False,
         worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
+    if args.simmim:
+        model = models_simmim.__dict__[args.model](
+            checkpoint_path=args.finetune
+        )
+    else:
+        model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
+            num_classes=args.nb_classes,
+            global_pool=False, #args.global_pool,
+        )
 
-    model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
-        num_classes=args.nb_classes,
-        global_pool=False, #args.global_pool,
-    )
-
-    if args.finetune and not args.eval:
+    if args.finetune and not args.eval and not args.simmim:
         # checkpoint = torch.load(args.finetune, map_location='cpu')
 
         # print("Load pre-trained checkpoint from: %s" % args.finetune)
@@ -298,6 +307,7 @@ def main(args):
                 activation=args.abmilp_act,
                 depth=args.abmilp_depth,
                 cond=args.abmilp_cond,
+                content=args.abmilp_content,
                 num_patches=model.patch_embed.num_patches,
 
             )
@@ -362,6 +372,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
+
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler,

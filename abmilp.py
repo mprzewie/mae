@@ -19,6 +19,7 @@ class ABMILPHead(nn.Module):
             activation: str= "tanh",
             depth: int = 2,
             cond: str="none",
+            content: str = "all",
             num_patches: Optional[int] = None,
 
         ):
@@ -26,9 +27,10 @@ class ABMILPHead(nn.Module):
 
         self.cond = cond
         self.self_attention_apply_to = self_attention_apply_to
+        self.content = content
         self.pos_embed = torch.nn.Parameter(
             torch.from_numpy(
-                get_2d_sincos_pos_embed(dim, int(num_patches ** .5), cls_token=True)
+                get_2d_sincos_pos_embed(dim, int(num_patches ** .5), cls_token=(content!="patch"))
             ).float().unsqueeze(0),
             requires_grad=False
         )
@@ -49,6 +51,10 @@ class ABMILPHead(nn.Module):
         self.attention_predictor = nn.Sequential(*attn_pred_layers)
 
     def forward_with_attn_map(self, x):
+        # assert False, x.shape
+        if self.content == "patch":
+            x = x[:, 1:] # keep patch tokens only
+
         x_attn = self.self_attn(x)
         if isinstance(x_attn, tuple):
             x_attn = x_attn[0]
