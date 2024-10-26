@@ -229,7 +229,7 @@ class RelativePositionBias(nn.Module):
         return relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
 
 
-class VisionTransformer(nn.Module):
+class VisionTransformerSimMIM(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
@@ -351,6 +351,8 @@ class VisionTransformer(nn.Module):
             ret = x_cls
         elif return_features == "pos":
             ret = x_pos
+        elif return_features == "raw":
+            ret = to_return
         elif return_features == "both":
             ret = torch.concat([x_cls, x_pos], dim=2)
         else:
@@ -362,6 +364,9 @@ class VisionTransformer(nn.Module):
         return ret, attentions, magnitudes
 
     def forward(self, x: torch.Tensor, return_features: str = "cls") -> torch.Tensor:
+        if return_features.startswith("abmilp"):
+            return_features = "raw"
+
         x, attn, magnitudes = self.forward_features(x, return_features=return_features)
         x = self.head(x)
         return x
@@ -398,7 +403,7 @@ def calculate_attn_stuff(attn, magn, attentions, magnitudes):
 
 
 def build_vit(config):
-    model = VisionTransformer(
+    model = VisionTransformerSimMIM(
         img_size=config.DATA.IMG_SIZE,
         patch_size=config.MODEL.VIT.PATCH_SIZE,
         in_chans=config.MODEL.VIT.IN_CHANS,
@@ -420,7 +425,9 @@ def build_vit(config):
     return model
 
 
-def vit_base_pretrained():
+def vit_base_pretrained(
+        checkpoint_path="simmim_pretrain__vit_base__img224__800ep.pth"
+):
     kwargs = {
         'img_size': 224,
         'patch_size': 16,
@@ -441,9 +448,9 @@ def vit_base_pretrained():
         'use_mean_pooling': False
     }
 
-    model = VisionTransformer(**kwargs)
+    model = VisionTransformerSimMIM(**kwargs)
 
-    state_dict = torch.load("simmim_pretrain__vit_base__img224__800ep.pth")["model"]
+    state_dict = torch.load(checkpoint_path)["model"]
     state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items()}
     del state_dict["mask_token"]
     del state_dict["decoder.0.bias"]
@@ -476,7 +483,7 @@ def vit_base_finetuned():
         'use_mean_pooling': True
     }
 
-    model = VisionTransformer(**kwargs)
+    model = VisionTransformerSimMIM(**kwargs)
 
     state_dict = torch.load("simmim_finetune__vit_base__img224__800ep.pth")["model"]
     state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items()}
@@ -489,3 +496,4 @@ def vit_base_finetuned():
         
     
     
+vit_base_patch16 = vit_base_pretrained

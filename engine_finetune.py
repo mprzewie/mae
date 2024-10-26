@@ -26,6 +26,7 @@ import util.misc as misc
 import util.lr_sched as lr_sched
 from engine_pretrain import AMP_PRECISIONS
 from models_mae import MaskedAutoencoderViT
+from models_simmim import VisionTransformerSimMIM
 from models_vit import VisionTransformer
 
 
@@ -64,7 +65,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 dtype=AMP_PRECISIONS[args.amp]
         ):
             model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
-            if isinstance(model_wo_ddp, VisionTransformer):
+            if isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM)):
                 outputs = model(samples, return_features=args.cls_features)
             else:
                 outputs = model(samples)
@@ -136,7 +137,7 @@ def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer],
             model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
             if isinstance(model_wo_ddp, MaskedAutoencoderViT):
                 _, _, _, (_, output, _, _, _) = model.forward(images, cls_features)
-            elif isinstance(model_wo_ddp, VisionTransformer):
+            elif isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM)):
                 output = model.forward(images, return_features=cls_features)
             else:
                 output = model.forward(images)
