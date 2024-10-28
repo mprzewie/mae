@@ -201,7 +201,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         )
 
         # self.global_pool = global_pool
-        if self.global_pool:
+        if self.global_pool == "avg":
             norm_layer = kwargs['norm_layer']
             embed_dim = kwargs['embed_dim']
             self.fc_norm = norm_layer(embed_dim)
@@ -226,7 +226,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             return_final_attn: bool = False,
             return_block: Optional[int] = None
     ):
-        if not self.cls_token:
+        if self.global_pool != "token":
             assert return_features in ["cls", "raw", "pos"]
 
         return_block = return_block or len(self.blocks) - 1
@@ -235,7 +235,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         B = x.shape[0]
         x = self.patch_embed(x)
 
-        if self.class_token:
+        if self.global_pool == "token":
             cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
             x = torch.cat((cls_tokens, x), dim=1)
 
@@ -243,8 +243,8 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        x_cls = x[:, :1] if self.cls_token else x[:, :0]
-        x_pos = x[:, 1:] if self.cls_token else x
+        x_cls = x[:, :1] if self.global_pool == "token" else x[:, :0]
+        x_pos = x[:, 1:] if self.global_pool == "token" else x
 
         assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
         x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
@@ -260,7 +260,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
 
         x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
-            B*shuffle_subsets, (L//shuffle_subsets)+1, D
+            B*shuffle_subsets, (L//shuffle_subsets)+(1 if self.global_pool=="token" else 0), D
         )
 
         attentions = []
@@ -268,7 +268,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         for b_id, blk in enumerate(self.blocks):
             x, attn, magn = blk.forward(x, return_attention=True, attn_temperature=attn_temperature)
 
-            if self.cls_token:
+            if self.global_pool == "token":
                 _, _, T, T = attn.shape
                 attn_range = torch.arange(T)
                 attn_diag = attn[:, :, attn_range, attn_range] # attention of tokens w.r.t. themselves
@@ -310,15 +310,16 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             #     )
 
         x_n_s_cl_d = x.reshape(
-            B, shuffle_subsets, (L//shuffle_subsets)+(1 if self.cls_token else 0), D)
+            B, shuffle_subsets, (L//shuffle_subsets)+(1 if self.global_pool=="token" else 0), D)
 
-        if not self.cls_token:
+        if self.global_pool != "token":
             # for backward compatibility, pad with 0 as if the cls token were present.
             x_n_s_cl_d = torch.cat(
                 [
                     torch.zeros(B, shuffle_subsets, 1, D).to(x_n_s_cl_d.device),
                     x_n_s_cl_d,
-                ]
+                ],
+                dim=2
             )
 
 
@@ -512,8 +513,8 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         else:
             raise NotImplementedError(return_features)
 
-        attentions = torch.cat(attentions, dim=2) # kind, batch, blocks, heads, tokens
-        magnitudes = torch.cat(magnitudes, dim=2) # kind, batch, blocks, tokens
+        attentions = torch.cat(attentions, dim=2) if len(attentions) > 0 else None # kind, batch, blocks, heads, tokens
+        magnitudes = torch.cat(magnitudes, dim=2) if len(magnitudes) > 0 else None # kind, batch, blocks, tokens
 
         if return_final_attn:
             return ret, attentions, magnitudes, (attn, x_n_s_cl_d)
