@@ -76,10 +76,10 @@ def get_args_parser():
     # * Finetuning params
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
-    parser.add_argument('--global_pool', action='store_true')
-    parser.set_defaults(global_pool=False)
-    parser.add_argument('--cls_token', action='store_false', dest='global_pool',
-                        help='Use class token instead of global pool for classification')
+    # parser.add_argument('--global_pool', action='store_true')
+    # parser.set_defaults(global_pool=False)
+    # parser.add_argument('--cls_token', action='store_false', dest='global_pool',
+    #                     help='Use class token instead of global pool for classification')
     parser.add_argument("--cls_features",
                         choices=CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
@@ -127,6 +127,9 @@ def get_args_parser():
 
 
     ####
+    parser.add_argument("--no_cls_token", action='store_true', default=False,
+                        help="Disable CLS token (e.g. for I-JEPA). You still have to select appropriate --cls_features"
+                        )
     parser.add_argument("--simmim", action="store_true", default=False)
 
     parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh",
@@ -245,9 +248,11 @@ def main(args):
             checkpoint_path=args.finetune
         )
     else:
+        cls_kwargs = dict()
+        if "huge" in args.model:
+            cls_kwargs["class_token"] = not args.no_cls_token
         model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
             num_classes=args.nb_classes,
-            global_pool=False, #args.global_pool,
         )
 
     if args.finetune and not args.eval and not args.simmim:

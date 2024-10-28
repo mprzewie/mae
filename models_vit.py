@@ -10,7 +10,7 @@ import math
 # --------------------------------------------------------
 
 from functools import partial
-from typing import Optional, Final, Type
+from typing import Optional, Final, Type, Literal
 
 import numpy as np
 import torch
@@ -188,14 +188,19 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             self,
             n_last_layers: int = 1,
             block_reshuffling: bool = False,
-            global_pool=False,
+            class_token: bool = True,
             block_fn: Type[nn.Module]=Block,
             oracle: bool = True,
             **kwargs
     ):
-        super(VisionTransformer, self).__init__(block_fn=block_fn, **kwargs)
 
-        self.global_pool = global_pool
+        super(VisionTransformer, self).__init__(
+            block_fn=block_fn, class_token=class_token,
+            global_pool=("token" if class_token else "avg"),
+            **kwargs
+        )
+
+        # self.global_pool = global_pool
         if self.global_pool:
             norm_layer = kwargs['norm_layer']
             embed_dim = kwargs['embed_dim']
@@ -221,19 +226,25 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             return_final_attn: bool = False,
             return_block: Optional[int] = None
     ):
+        if not self.cls_token:
+            assert return_features in ["cls", "raw", "pos"]
+
         return_block = return_block or len(self.blocks) - 1
         # assert shuffle_subsets == 1, shuffle_subsets
         orig_x = x
         B = x.shape[0]
         x = self.patch_embed(x)
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-        x = torch.cat((cls_tokens, x), dim=1)
+        if self.class_token:
+            cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+            x = torch.cat((cls_tokens, x), dim=1)
+
+
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        x_cls = x[:, :1]
-        x_pos = x[:, 1:]
+        x_cls = x[:, :1] if self.cls_token else x[:, :0]
+        x_pos = x[:, 1:] if self.cls_token else x
 
         assert x_pos.shape[1] % shuffle_subsets == 0, f"{x_pos.shape[1]=} not divisible by {shuffle_subsets=}"
         x_cls = x_cls.unsqueeze(1).repeat(1, shuffle_subsets, 1, 1)
@@ -257,30 +268,31 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         for b_id, blk in enumerate(self.blocks):
             x, attn, magn = blk.forward(x, return_attention=True, attn_temperature=attn_temperature)
 
-            _, _, T, T = attn.shape
-            attn_range = torch.arange(T)
-            attn_diag = attn[:, :, attn_range, attn_range] # attention of tokens w.r.t. themselves
-            cls_all_attn = attn[:, :, 0, ]  # attention of cls token to all tokens
-            all_cls_attn = attn[:, :, :, 0] # attention of all tokens to cls token
+            if self.cls_token:
+                _, _, T, T = attn.shape
+                attn_range = torch.arange(T)
+                attn_diag = attn[:, :, attn_range, attn_range] # attention of tokens w.r.t. themselves
+                cls_all_attn = attn[:, :, 0, ]  # attention of cls token to all tokens
+                all_cls_attn = attn[:, :, :, 0] # attention of all tokens to cls token
 
-            attn_wo_cls = attn[:, :, :, 1:]
-            attn_wo_cls_denom = attn_wo_cls.sum(dim=3, keepdim=True)
+                attn_wo_cls = attn[:, :, :, 1:]
+                attn_wo_cls_denom = attn_wo_cls.sum(dim=3, keepdim=True)
 
-            attn_wo_cls = attn_wo_cls / (attn_wo_cls_denom + 1e-6)
+                attn_wo_cls = attn_wo_cls / (attn_wo_cls_denom + 1e-6)
 
-            all_pos_attn_entropy = -(attn_wo_cls * (attn_wo_cls + 1e-6).log()).sum(dim=3)
+                all_pos_attn_entropy = -(attn_wo_cls * (attn_wo_cls + 1e-6).log()).sum(dim=3)
 
-            attn_adj_for_cls = attn / (attn_wo_cls_denom + 1e-6)
+                attn_adj_for_cls = attn / (attn_wo_cls_denom + 1e-6)
 
-            attn_diag_adj_for_cls = attn_adj_for_cls[:, :, attn_range, attn_range]
+                attn_diag_adj_for_cls = attn_adj_for_cls[:, :, attn_range, attn_range]
 
-            attn_stats = torch.stack([attn_diag, attn_diag_adj_for_cls, cls_all_attn, all_cls_attn, all_pos_attn_entropy])
+                attn_stats = torch.stack([attn_diag, attn_diag_adj_for_cls, cls_all_attn, all_cls_attn, all_pos_attn_entropy])
 
-            attn_stats = attn_stats.unsqueeze(2)
+                attn_stats = attn_stats.unsqueeze(2)
 
-            # assert False, attn_stats.shape
-            attentions.append(attn_stats.detach())
-            magnitudes.append(magn.unsqueeze(2).detach())
+                # assert False, attn_stats.shape
+                attentions.append(attn_stats.detach())
+                magnitudes.append(magn.unsqueeze(2).detach())
 
             if b_id == return_block:
                 break
@@ -297,7 +309,18 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             #         B * shuffle_subsets, (L // shuffle_subsets) + 1, D
             #     )
 
-        x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L//shuffle_subsets)+1, D)
+        x_n_s_cl_d = x.reshape(
+            B, shuffle_subsets, (L//shuffle_subsets)+(1 if self.cls_token else 0), D)
+
+        if not self.cls_token:
+            # for backward compatibility, pad with 0 as if the cls token were present.
+            x_n_s_cl_d = torch.cat(
+                [
+                    torch.zeros(B, shuffle_subsets, 1, D).to(x_n_s_cl_d.device),
+                    x_n_s_cl_d,
+                ]
+            )
+
 
         x_cls = x_n_s_cl_d[:, :, 0]
         x_pos = x_n_s_cl_d[:, :, 1:].mean(dim=2)
@@ -539,9 +562,9 @@ def vit_large_patch16(**kwargs):
     return model
 
 
-def vit_huge_patch14(cls_token: bool=True, **kwargs):
+def vit_huge_patch14(class_token: bool=True, **kwargs):
     model = VisionTransformer(
-        patch_size=14, embed_dim=1280, depth=32, num_heads=16, mlp_ratio=4, qkv_bias=True, class_token=cls_token,
+        patch_size=14, embed_dim=1280, depth=32, num_heads=16, mlp_ratio=4, qkv_bias=True, class_token=class_token,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
