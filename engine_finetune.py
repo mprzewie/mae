@@ -66,7 +66,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         ):
             model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
             if isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM)):
-                outputs = model(samples, return_features=args.cls_features)
+                outputs = model(samples, return_features=args.cls_features, return_block=args.return_block)
             else:
                 outputs = model(samples)
 
@@ -115,7 +115,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer], device, *, return_targets_and_preds: bool = False, cls_features: str = "cls"):
+def evaluate(
+        data_loader,
+        model: Union[MaskedAutoencoderViT, VisionTransformer],
+        device, *,
+        return_targets_and_preds: bool = False, cls_features: str = "cls",
+        return_block: Optional[int] = None
+):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -136,10 +142,12 @@ def evaluate(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer],
         with torch.cuda.amp.autocast():
             model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
             if isinstance(model_wo_ddp, MaskedAutoencoderViT):
+                assert return_block is None, f"{return_block=} not used"
                 _, _, _, (_, output, _, _, _) = model.forward(images, cls_features)
             elif isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM)):
-                output = model.forward(images, return_features=cls_features)
+                output = model.forward(images, return_features=cls_features, return_block=return_block)
             else:
+                assert return_block is None, f"{return_block=} not used"
                 output = model.forward(images)
 
 
