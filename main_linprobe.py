@@ -253,6 +253,7 @@ def main(args):
             cls_kwargs["class_token"] = not args.no_cls_token
         model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
             num_classes=args.nb_classes,
+            **cls_kwargs
         )
 
     if args.finetune and not args.eval and not args.simmim:
@@ -284,7 +285,11 @@ def main(args):
                 del checkpoint_model[k]
 
         # interpolate position embedding
-        interpolate_pos_embed(model, checkpoint_model)
+        try:
+            interpolate_pos_embed(model, checkpoint_model)
+        except Exception as e:
+            print("couldn't interpolate bc of", e)
+            print("Is [cls] switched off?", args.no_cls_token)
 
         # load pre-trained model
         msg = model.load_state_dict(checkpoint_model, strict=False)
@@ -295,7 +300,7 @@ def main(args):
         # else:
 
         assert all([
-            k.startswith("head") or k.startswith("oracle")
+            k.startswith("head") or k.startswith("oracle") or k.startswith("fc")
             for k in msg.missing_keys
         ]), sorted(msg.missing_keys)
 
