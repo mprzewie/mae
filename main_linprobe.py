@@ -83,6 +83,7 @@ def get_args_parser():
     parser.add_argument("--cls_features",
                         choices=CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
+    parser.add_argument("--return_block", type=int, default=None)
     parser.add_argument("--checkpoint_key", default="model", type=str)
 
     # Dataset parameters
@@ -390,7 +391,7 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        test_stats = evaluate(data_loader_val, model, device, cls_features=args.cls_features)
+        test_stats = evaluate(data_loader_val, model, device, cls_features=args.cls_features, return_block=args.return_block)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
