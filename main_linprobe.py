@@ -395,7 +395,7 @@ def main(args):
         if args.output_dir:
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp.head, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch, test_stats=log_stats,)
+                loss_scaler=loss_scaler, epoch=epoch, test_stats=log_stats, include_epoch_in_filename=False)
 
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
