@@ -321,7 +321,7 @@ class VisionTransformerSimMIM(nn.Module):
         self.num_classes = num_classes
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x, return_features: str = "cls", shuffle_subsets=None, return_block_output=8):
+    def forward_features(self, x, return_features: str = "cls", shuffle_subsets=None, return_block=12):
         x = self.patch_embed(x)
         batch_size, seq_len, _ = x.size()
 
@@ -339,10 +339,10 @@ class VisionTransformerSimMIM(nn.Module):
         for i, blk in enumerate(self.blocks):
             x, attn, magn = blk(x, rel_pos_bias=rel_pos_bias, return_attention=True)  # !
             calculate_attn_stuff(attn, magn, attentions, magnitudes) # !
-            if i == return_block_output:
+            if i == return_block:
                 to_return = x
-                
-        if return_block_output is None:
+
+        if return_block is None or return_block >= len(self.blocks):
             to_return = x
 
         x_cls = to_return[:, 0]
@@ -363,11 +363,11 @@ class VisionTransformerSimMIM(nn.Module):
 
         return ret, attentions, magnitudes
 
-    def forward(self, x: torch.Tensor, return_features: str = "cls") -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_features: str = "cls", return_block=12) -> torch.Tensor:
         if return_features.startswith("abmilp"):
             return_features = "raw"
 
-        x, attn, magnitudes = self.forward_features(x, return_features=return_features)
+        x, attn, magnitudes = self.forward_features(x, return_features=return_features, return_block=return_block)
         x = self.head(x)
         return x
             
@@ -452,9 +452,13 @@ def vit_base_pretrained(
 
     state_dict = torch.load(checkpoint_path)["model"]
     state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items()}
-    del state_dict["mask_token"]
-    del state_dict["decoder.0.bias"]
-    del state_dict["decoder.0.weight"]
+
+    try:
+        del state_dict["mask_token"]
+        del state_dict["decoder.0.bias"]
+        del state_dict["decoder.0.weight"]
+    except Exception as e:
+        print(e)
     
     res = model.load_state_dict(state_dict, strict=False)
     print(res)
