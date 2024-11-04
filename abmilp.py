@@ -7,7 +7,6 @@ import torch.nn
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models_vit import Attention
 from util.pos_embed import get_2d_sincos_pos_embed
 
 
@@ -35,6 +34,7 @@ class ABMILPHead(nn.Module):
             requires_grad=False
         )
 
+        from models_vit import Attention
         self.self_attn = Attention(dim) if self.self_attention_apply_to != "none" else nn.Identity()
 
 
