@@ -75,13 +75,25 @@ def ncut(feats, dims, scales, init_image_size, tau=0, eps=1e-5, im_name='', no_b
 
     A = (feats @ feats.transpose(1, 0))
     A = A.cpu().numpy()
+    
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    fig,ax = plt.subplots(2)
+    sns.heatmap(A, ax=ax[0])
+    
     if no_binary_graph:
         A[A < tau] = eps
     else:
+        A = A - A.min()
+        A = A / (A.max() + 1e-6)
         A = A > tau
         A = np.where(A.astype(float) == 0, eps, A)
+    
+    sns.heatmap(A, ax=ax[1])
+    fig.show()
+    
     d_i = np.sum(A, axis=1)
-    assert False, d_i[:5]
+    # assert False, d_i[:5]
     D = np.diag(d_i)
     # print("A", A[:1, :10])
     # print("d_i", d_i[:10])

@@ -401,8 +401,11 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
             fm = fm.unsqueeze(1)
-
-            token_selections["dino_cls_attention_map"] = d_attn.mean(dim=1).squeeze().detach()
+            
+            d_mean = d_attn.mean(dim=1).squeeze()
+            d_norm = d_mean / (d_mean.sum(dim=1, keepdim=True) + 1e-6)
+            # d_mean_norm = d_mean / (d_mean.sum())
+            token_selections["dino_cls_attention_map"] = d_norm.detach()
 
 
             fm_mul = fm * d_attn
@@ -414,7 +417,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             x_n_cl_d = x_n_s_cl_d[:, 0]
             fm = x_n_cl_d[:, 1:]
 
-            print("FM", fm.shape, attn.shape)
+            # print("FM", fm.shape, attn.shape)
             kind = return_features.split("attn-")[1] if "attn" in return_features else None
             # assert False, all_pos_attn_entropy.shape
             cls_pos_attn_entropy = all_pos_attn_entropy[:, :, 0]
@@ -481,7 +484,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             token_selections["ncut_eigen_softmax"] = eigen_softmax.detach()
 
             method = return_features.split("-")[1] if "-" in return_features else "eig"
-            print("METHOD", method)
+            # print("METHOD", method)
             if method == "eigsft": # in return_features:
                 mul = eigen_softmax
             elif method =="eigbip": # in return_features:
@@ -501,10 +504,11 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
         if return_features == "toksec":
-            assert False, {
-                k: v.shape
-                for (k,v) in token_selections.items()
-            }
+            # assert False, {
+            #     k: v.shape
+            #     for (k,v) in token_selections.items()
+            # }
+            return token_selections
         # else:
         #     raise NotImplementedError(return_features)
 
