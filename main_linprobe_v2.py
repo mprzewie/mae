@@ -248,7 +248,6 @@ def main(args):
     else:
         model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
             num_classes=args.nb_classes,
-            global_pool=False, #args.global_pool,
             n_last_layers=args.n_last_layers,
             block_reshuffling=args.block_reshuffling,
             **size_patch_kwargs
