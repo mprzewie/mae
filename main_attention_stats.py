@@ -116,7 +116,7 @@ def get_args_parser():
 
 def main(args):
     # misc.init_distributed_mode(args)
-    args.aug_every = args.aug_every or args.epochs
+    # args.aug_every = args.aug_every or args.epochs
 
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
@@ -132,9 +132,10 @@ def main(args):
     cudnn.benchmark = True
 
     # linear probe: weak augmentation
-    dataset_train, dataset_val = build_dataset_v2(args, is_pretrain=False)
+    args.dino_aug = False # hack
+    _, dataset_val = build_dataset_v2(args, is_pretrain=False)
 
-    print(dataset_train)
+    # print(dataset_train)
     print(dataset_val)
 
     args.distributed = False
@@ -143,32 +144,36 @@ def main(args):
 
     if args.wds:
         from util.wids_custom import DistributedChunkedSampler
-        sampler_train = DistributedChunkedSampler(dataset_train, shuffle=True)
+        # sampler_train = DistributedChunkedSampler(dataset_train, shuffle=True)
         sampler_val = DistributedChunkedSampler(dataset_val, shuffle=False)
     else:
-        sampler_train = torch.utils.data.RandomSampler(dataset_train)
+        # sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    print("Sampler_train = %s" % str(sampler_train))
-    print("Sampler_val = %s" % str(sampler_train))
+    # print("Sampler_train = %s" % str(sampler_train))
+    # print("Sampler_val = %s" % str(sampler_train))
+    
+    if args.output_dir is not None:
+        misc.maybe_setup_wandb(args.output_dir, args=args, job_type="attn_stats")
 
-    if (not args.distributed or (global_rank == 0)) and args.output_dir is not None and not args.eval:
-        os.makedirs(args.output_dir, exist_ok=True)
-        misc.maybe_setup_wandb(args.output_dir, args=args, job_type="linprobe")
+#     if (not args.distributed or (global_rank == 0)) and args.output_dir is not None and not args.eval:
+#         os.makedirs(args.output_dir, exist_ok=True)
+#         misc.maybe_setup_wandb(args.output_dir, args=args, job_type="linprobe")
 
-        log_writer = SummaryWriter(log_dir=args.output_dir)
-    else:
-        log_writer = None
+#         log_writer = SummaryWriter(log_dir=args.output_dir)
+#     else:
+#         log_writer = None
 
     # assert False, (len(dataset_train), len(dataset_val))
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train,
-        sampler=sampler_train,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=False,
-    )
+    
+    # data_loader_train = torch.utils.data.DataLoader(
+    #     dataset_train,
+    #     sampler=sampler_train,
+    #     batch_size=args.batch_size,
+    #     num_workers=args.num_workers,
+    #     pin_memory=args.pin_mem,
+    #     drop_last=False,
+    # )
 
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val,
@@ -199,14 +204,14 @@ def main(args):
     else:
         model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
             num_classes=1000,
-            n_last_layers=args.n_last_layers,
-            block_reshuffling=args.block_reshuffling,
+            # n_last_layers=args.n_last_layers,
+            # block_reshuffling=args.block_reshuffling,
             **size_patch_kwargs
         )
 
     # classifier = AggHead(model.head, agg_method=args.agg_method)
 
-    if (args.finetune and not args.eval):
+    if args.finetune:
 
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
@@ -274,20 +279,20 @@ def main(args):
 
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
-    eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
+    # eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
     
-    if args.lr is None:  # only base_lr is specified
-        args.lr = args.blr * eff_batch_size / 256
+    # if args.lr is None:  # only base_lr is specified
+    #     args.lr = args.blr * eff_batch_size / 256
 
-    print("base lr: %.2e" % (args.lr * 256 / eff_batch_size))
-    print("actual lr: %.2e" % args.lr)
+#     print("base lr: %.2e" % (args.lr * 256 / eff_batch_size))
+#     print("actual lr: %.2e" % args.lr)
 
-    print("accumulate grad iterations: %d" % args.accum_iter)
-    print("effective batch size: %d" % eff_batch_size)
+#     print("accumulate grad iterations: %d" % args.accum_iter)
+#     print("effective batch size: %d" % eff_batch_size)
 
-    if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
-        model_without_ddp = model.module
+    # if args.distributed:
+    #     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+    #     model_without_ddp = model.module
 
 
     # optimizer = LARS(classifier.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -311,9 +316,11 @@ def main(args):
                 dtype=AMP_PRECISIONS[args.amp]
         ):
             L_test, Y_test, A_test, M_test = collect_features(
-                model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="attention stats",
-                return_features=args.cls_features,
-                return_block=None,
+                model, data_loader_val, device, 
+                # shuffle_subsets=args.shuffle_subsets, 
+                tqdm_desc="attention stats",
+                # return_features=args.cls_features,
+                # return_block=None,
             )
 
         mean_attn_stats = A_test.mean(dim=(0, 2))
@@ -332,8 +339,8 @@ def main(args):
         pos_magnitude = mean_magn_stats[:, 1]
 
         stats_pf = "test_attn"
-        if args.shuffle_subsets > 1:
-            stats_pf = stats_pf + f"/ss{args.shuffle_subsets}"
+        # if args.shuffle_subsets > 1:
+        #     stats_pf = stats_pf + f"/ss{args.shuffle_subsets}"
 
         for b in range(len(cc_attns)):
             wandb.log({
@@ -364,13 +371,16 @@ def main(args):
             {"monitoring/tsne": fig}
         )
 
-    if args.attn_only:
-        exit(0)
+    # if args.attn_only:
+    #     exit(0)
 
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
-        device, shuffle_subsets: int, return_features: str, return_block: int, tqdm_desc: str = None
+        device, 
+    # shuffle_subsets: int, return_features: str, 
+    # return_block: int, 
+    tqdm_desc: str = None
 ):
     model.eval()
     with torch.no_grad():
@@ -385,7 +395,7 @@ def collect_features(
                     enabled=args.amp != "none",
                     dtype=AMP_PRECISIONS[args.amp]
             ):
-                z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features, return_block=return_block)
+                z, attns, magnitudes = model.forward_features(data.to(device))
 
             cls_cls_attns = attns[0, :, :, :, :1]
             pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)
@@ -415,8 +425,8 @@ def collect_features(
             labels.append(target.detach().short().cpu())
 
             BSS, L, H, _ = attn_stats.shape
-            attn_stats = attn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, L, H, 8).mean(dim=1)
-            magn_stats = magn_stats.reshape(BSS // args.shuffle_subsets, args.shuffle_subsets, L, 2).mean(dim=1)
+            attn_stats = attn_stats.reshape(BSS, L, H, 8)
+            magn_stats = magn_stats.reshape(BSS, L, 2)
 
             attns_list.append(attn_stats.detach().cpu())
             magn_list.append(magn_stats.detach().cpu())
