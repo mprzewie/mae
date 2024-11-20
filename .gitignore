@@ -12,3 +12,4 @@ slurm-*.out
 *.pth
 *.pkl
 datasets/
+output_dir/

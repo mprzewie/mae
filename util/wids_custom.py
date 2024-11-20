@@ -1,27 +1,14 @@
 """incorporate https://github.com/webdataset/webdataset/pull/382/commits/bdb5de09c78abcd59804748bf9dcd63cada5dc8a"""
 
-import base64
-import gzip
-import hashlib
-import io
 import math
-import os
 import random
-import re
-import sqlite3
-import sys
-import uuid
 import warnings
-from functools import partial
-from typing import Any, BinaryIO, Dict, Optional, TypeVar, Union
-from urllib.parse import quote, urlparse
-
-import numpy as np
-import torch.distributed as dist
-
-from torch.utils.data import Dataset, Sampler
 from typing import Optional
+
+import torch.distributed as dist
+from torch.utils.data import Dataset, Sampler
 from wids.wids import iterate_ranges
+
 
 class ChunkedSampler(Sampler):
     """A sampler that samples in chunks and then shuffles the samples within each chunk.

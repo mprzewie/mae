@@ -1,14 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# DeiT: https://github.com/facebookresearch/deit
-# BEiT: https://github.com/microsoft/unilm/tree/master/beit
-# --------------------------------------------------------
-
 import builtins
 import datetime
 import os
@@ -21,7 +10,12 @@ import torch.distributed as dist
 import wandb
 
 
-# from torch._six import inf
+AMP_PRECISIONS = {
+    "float16": torch.float16,
+    "float32": torch.float32,
+    "bfloat16": torch.bfloat16,
+    "none": torch.float32,
+}
 
 
 class SmoothedValue(object):
@@ -392,3 +386,5 @@ def maybe_setup_wandb(logdir, args=None, run_name_suffix=None, **init_kwargs):
     )
 
     print("WANDB run", wandb.run.id, new_run_name, origin_run_name)
+
+

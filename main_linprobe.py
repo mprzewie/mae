@@ -1,13 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# DeiT: https://github.com/facebookresearch/deit
-# MoCo v3: https://github.com/facebookresearch/moco-v3
-# --------------------------------------------------------
 
 import argparse
 import datetime
@@ -33,10 +23,9 @@ import models_simmim
 
 import util.misc as misc
 from abmilp import ABMILPHead
-from engine_pretrain import AMP_PRECISIONS
 from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
-from util.misc import NativeScalerWithGradNormCount as NativeScaler
+from util.misc import NativeScalerWithGradNormCount as NativeScaler, AMP_PRECISIONS
 from util.lars import LARS
 from util.crop import RandomResizedCrop
 

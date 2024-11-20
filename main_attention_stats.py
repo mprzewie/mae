@@ -1,71 +1,38 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# DeiT: https://github.com/facebookresearch/deit
-# MoCo v3: https://github.com/facebookresearch/moco-v3
-# --------------------------------------------------------
-
 import argparse
-import datetime
-import json
-from copy import deepcopy
-from typing import Type
+import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import os
-import time
-from pathlib import Path
-
-import psutil
 import torch
 import torch.backends.cudnn as cudnn
-import torchvision
 import wandb
-from pygments.lexer import default
 from sklearn.manifold import TSNE
-from timm.utils import accuracy
-from torch import nn, optim
-from torch.utils.tensorboard import SummaryWriter
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 from torch.utils.data import TensorDataset
-import timm
-import gc
-# import nvidia_smi
-
+from torch.utils.tensorboard import SummaryWriter
 # nvidia_smi.nvmlInit()
 # assert timm.__version__ == "0.3.2" # version check
-from timm.models.layers import trunc_normal_
-from torchvision.datasets import STL10
 from tqdm import tqdm
 
-import util.misc as misc
-from engine_pretrain import AMP_PRECISIONS
-from util.datasets import build_dataset_v2
-from util.pos_embed import interpolate_pos_embed
-from util.misc import NativeScalerWithGradNormCount as NativeScaler
-from util.lars import LARS
-from util.crop import RandomResizedCrop
-
-import models_vit
 import models_simmim
-from engine_finetune import train_one_epoch, evaluate
+import models_vit
+import util.misc as misc
+from util.datasets import build_dataset_v2
+from util.misc import AMP_PRECISIONS
+from util.pos_embed import interpolate_pos_embed
+
+
+# import nvidia_smi
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('MAE linear probing for image classification', add_help=False)
+    parser = argparse.ArgumentParser('MAE linear attention statistics', add_help=False)
     parser.add_argument('--batch_size', default=512, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=90, type=int)
-    parser.add_argument("--aug_every", type=int, default=None)
+    # parser.add_argument('--epochs', default=90, type=int)
+    # parser.add_argument("--aug_every", type=int, default=None)
 
-    parser.add_argument('--accum_iter', default=1, type=int,
-                        help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
+    # parser.add_argument('--accum_iter', default=1, type=int, help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
     parser.add_argument('--model', default='vit_base_patch16', type=str, metavar='MODEL',
@@ -74,24 +41,23 @@ def get_args_parser():
                         help='images input size')
     parser.add_argument("--simmim", action="store_true", default=False)
     # Optimizer parameters
-    parser.add_argument('--weight_decay', type=float, default=0,
-                        help='weight decay (default: 0 for linear probe following MoCo v1)')
+    # parser.add_argument('--weight_decay', type=float, default=0,
+    #                     help='weight decay (default: 0 for linear probe following MoCo v1)')
 
-    parser.add_argument('--lr', type=float, default=None, metavar='LR',
-                        help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=0.1, metavar='LR',
-                        help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
-    parser.add_argument("--dino_aug", action="store_true", default=False)
+    # parser.add_argument('--lr', type=float, default=None, metavar='LR',
+    #                     help='learning rate (absolute lr)')
+    # parser.add_argument('--blr', type=float, default=0.1, metavar='LR',
+    #                     help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
+    # parser.add_argument("--dino_aug", action="store_true", default=False)
 
-    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
-                        help='lower lr bound for cyclic schedulers that hit 0')
+    # parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
+    #                     help='lower lr bound for cyclic schedulers that hit 0')
 
-    parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
-                        help='epochs to warmup LR')
+    # parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
+    #                     help='epochs to warmup LR')
 
     # * Finetuning params
-    parser.add_argument('--finetune', default='',
-                        help='finetune from checkpoint')
+    parser.add_argument('--finetune', default='', help='finetune from checkpoint')
     parser.add_argument("--checkpoint_key", default="model", type=str)
     parser.add_argument("--cca_bias", default="none")
 
@@ -99,34 +65,34 @@ def get_args_parser():
     parser.set_defaults(global_pool=False)
     # parser.add_argument('--cls_token', action='store_false', dest='global_pool',
     #                     help='Use class token instead of global pool for classification')
-    parser.add_argument("--n_last_layers", type=int, default=1, help="Use activations from N last layers for classification")
-    parser.add_argument("--shuffle_subsets", type=int, default=1, help="Shuffle positional tokens into N subsets during inference")
-    parser.add_argument("--agg_method", choices=["rep", "log", "t1"], default="rep", help="representations / logits / take 1 of shuffled")
-    parser.add_argument("--cls_features", choices=models_vit.CLS_FT_CHOICES,
-                        default="cls", help="cls token / positional tokens for classification")
-    parser.add_argument("--num_block", type=int, default=None)
-    parser.add_argument("--block_reshuffling", "--br", action="store_true", help="reshuffle pos tokens btw. blocks")
+    # parser.add_argument("--n_last_layers", type=int, default=1, help="Use activations from N last layers for classification")
+    # parser.add_argument("--shuffle_subsets", type=int, default=1, help="Shuffle positional tokens into N subsets during inference")
+    # parser.add_argument("--agg_method", choices=["rep", "log", "t1"], default="rep", help="representations / logits / take 1 of shuffled")
+    # parser.add_argument("--cls_features", choices=models_vit.CLS_FT_CHOICES,
+    #                     default="cls", help="cls token / positional tokens for classification")
+    # parser.add_argument("--num_block", type=int, default=None)
+    # parser.add_argument("--block_reshuffling", "--br", action="store_true", help="reshuffle pos tokens btw. blocks")
 
     # Dataset parameters
     parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=Path,
                         help='dataset path')
-    parser.add_argument('--nb_classes', default=1000, type=int,
-                        help='number of the classification types')
+    # parser.add_argument('--nb_classes', default=1000, type=int,
+    #                     help='number of the classification types')
 
     parser.add_argument('--output_dir', default=None,
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='',
-                        help='resume from checkpoint')
+    # parser.add_argument('--resume', default='',
+    #                     help='resume from checkpoint')
 
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
-                        help='start epoch')
-    parser.add_argument('--eval', action='store_true',
-                        help='Perform evaluation only')
-    parser.add_argument('--dist_eval', action='store_true', default=False,
-                        help='Enabling distributed evaluation (recommended during training for faster monitor')
+    # parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
+    #                     help='start epoch')
+    # parser.add_argument('--eval', action='store_true',
+    #                     help='Perform evaluation only')
+    # parser.add_argument('--dist_eval', action='store_true', default=False,
+    #                     help='Enabling distributed evaluation (recommended during training for faster monitor')
     parser.add_argument('--num_workers', default=10, type=int)
     parser.add_argument('--pin_mem', action='store_true',
                         help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
@@ -134,12 +100,12 @@ def get_args_parser():
     parser.set_defaults(pin_mem=True)
 
     # distributed training parameters
-    parser.add_argument('--world_size', default=1, type=int,
-                        help='number of distributed processes')
-    parser.add_argument('--local_rank', default=-1, type=int)
-    parser.add_argument('--dist_on_itp', action='store_true')
-    parser.add_argument('--dist_url', default='env://',
-                        help='url used to set up distributed training')
+    # parser.add_argument('--world_size', default=1, type=int,
+    #                     help='number of distributed processes')
+    # parser.add_argument('--local_rank', default=-1, type=int)
+    # parser.add_argument('--dist_on_itp', action='store_true')
+    # parser.add_argument('--dist_url', default='env://',
+    #                     help='url used to set up distributed training')
     parser.add_argument("--attn_only", action="store_true", default=False)
     parser.add_argument("--draw_2d_embeddings", action="store_true", default=False)
     parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
@@ -179,21 +145,6 @@ def main(args):
         from util.wids_custom import DistributedChunkedSampler
         sampler_train = DistributedChunkedSampler(dataset_train, shuffle=True)
         sampler_val = DistributedChunkedSampler(dataset_val, shuffle=False)
-    # elif args.distributed:
-    #     num_tasks = misc.get_world_size()
-    #     global_rank = misc.get_rank()
-    #     sampler_train = torch.utils.data.DistributedSampler(
-    #         dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-    #     )
-    #     if args.dist_eval:
-    #         if len(dataset_val) % num_tasks != 0:
-    #             print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-    #                   'This will slightly alter validation results as extra duplicate entries are added to achieve '
-    #                   'equal num of samples per-process.')
-    #         sampler_val = torch.utils.data.DistributedSampler(
-    #             dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=True)  # shuffle=True to reduce monitor bias
-    #     else:
-    #         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
@@ -247,14 +198,13 @@ def main(args):
         model = models_simmim.__dict__[args.model]()
     else:
         model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
-            num_classes=args.nb_classes,
+            num_classes=1000,
             n_last_layers=args.n_last_layers,
             block_reshuffling=args.block_reshuffling,
             **size_patch_kwargs
         )
-        #print(model)
 
-    classifier = AggHead(model.head, agg_method=args.agg_method)
+    # classifier = AggHead(model.head, agg_method=args.agg_method)
 
     if (args.finetune and not args.eval):
 
@@ -301,7 +251,7 @@ def main(args):
         # assert set(msg.missing_keys) == {'head.weight', 'head.bias'}, msg.missing_keys
 
         # manually initialize fc layer: following MoCo v3
-    trunc_normal_(classifier.mlp.weight, std=0.01)
+    # trunc_normal_(classifier.mlp.weight, std=0.01)
 
     # for linear prob only
     # assert False, model.head
@@ -311,11 +261,11 @@ def main(args):
     # freeze all but the head
     # for _, p in model.named_parameters():
     #     p.requires_grad = False
-    for _, p in classifier.named_parameters():
-        p.requires_grad = True
+    # for _, p in classifier.named_parameters():
+    #     p.requires_grad = True
 
     model.to(device)
-    classifier.to(device)
+    # classifier.to(device)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -340,20 +290,20 @@ def main(args):
         model_without_ddp = model.module
 
 
-    optimizer = LARS(classifier.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    print(optimizer)
-    loss_scaler = NativeScaler()
+    # optimizer = LARS(classifier.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # print(optimizer)
+    # loss_scaler = NativeScaler()
 
-    criterion = torch.nn.CrossEntropyLoss()
+    # criterion = torch.nn.CrossEntropyLoss()
 
-    print("criterion = %s" % str(criterion))
+    # print("criterion = %s" % str(criterion))
 
-    misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
+    # misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
-    if args.eval:
-        test_stats = evaluate(data_loader_val, model, device)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        exit(0)
+    # if args.eval:
+    #     test_stats = evaluate(data_loader_val, model, device)
+    #     print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+    #     exit(0)
 
     if wandb.run is not None:
         with torch.cuda.amp.autocast(
@@ -417,155 +367,6 @@ def main(args):
     if args.attn_only:
         exit(0)
 
-    # _, _, A_train, _ = collect_features(
-    #     model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca bias before",
-    #     return_features=args.cls_features
-    # )
-    #
-    # cca = A_train[:, :, :, 0].mean(dim=0)
-    # ccs = A_train[:, :, :, 0].std(dim=0)
-    #
-    # cca_mean = cca.mean(dim=1)
-    # n_blocks = len(model_without_ddp.blocks)
-    # target_cca = torch.linspace((n_blocks - 1) / n_blocks, 1 / n_blocks, n_blocks)
-    #
-    # if args.cca_bias.startswith("linear"):
-    #     cca_biases = target_cca.unsqueeze(1) - cca
-    #
-    #     if "clamp_ceil" in args.cca_bias:
-    #         cca_biases = cca_biases.clamp(max=0)
-    #
-    #     for bi in range(n_blocks):
-    #         model_without_ddp.blocks[bi].attn.cls_bias = cca_biases[bi].to(device)
-    #
-    # elif args.cca_bias != "none":
-    #     raise NotImplementedError(args.cca_bias)
-    #
-    # if args.cca_bias != "none":
-    #     _, _, A_train, _ = collect_features(
-    #         model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="cca after",
-    #         return_features=args.cls_features
-    #     )
-    #
-    # cca2 = A_train[:, :, :, 0].mean(dim=0)
-    # cca_mean2 = cca2.mean(dim=1)
-    #
-    # fig, ax = plt.subplots(cca.shape[1], figsize=(cca.shape[0], 2 * cca.shape[1]))
-    # for h in range(cca.shape[1]):
-    #     ax[h].errorbar(list(range(len(cca))), cca[:, h], yerr=ccs[:, h], color="blue", label=f"cca before")
-    #     ax[h].plot(cca_mean, color="red", label=f"mean cca before")
-    #     ax[h].plot(target_cca, color="green", ls="--", label=f"target cca")
-    #     ax[h].plot(cca2[:, h], color="orange", ls="-.", label=f"cca after")
-    #     ax[h].plot(cca_mean2, color="gray", label=f"mean cca after")
-    #     ax[h].set_title(f"Head {h}")
-    #     ax[h].set_xlabel("VIT Block")
-    #     ax[h].set_ylim(-0.1, 1.2)
-    #     ax[0].legend(ncols=5)
-    #
-    # if wandb.run is not None:
-    #     wandb.log({"monitoring/cca_bias": fig})
-
-    print(f"Start training for {args.epochs} epochs")
-    start_time = time.time()
-    max_accuracy = 0.0
-
-    for epoch in range(args.start_epoch, args.epochs):
-
-        if epoch % args.aug_every == 0:
-
-            with torch.cuda.amp.autocast(
-                    enabled=args.amp != "none",
-                    dtype=AMP_PRECISIONS[args.amp]
-            ):
-                X_train, Y_train, _, _ = collect_features(
-                    model, data_loader_train, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="train",
-                    return_features=args.cls_features, return_block=args.num_block,
-                )
-                X_test, Y_test, A_test, M_test = collect_features(
-                    model, data_loader_val, device, shuffle_subsets=args.shuffle_subsets, tqdm_desc="val",
-                    return_features=args.cls_features, return_block=args.num_block,
-                )
-
-            ds_train = TensorDataset(X_train, Y_train)
-            dl_train = torch.utils.data.DataLoader(
-                ds_train, shuffle=True,
-                batch_size=args.batch_size,
-                num_workers=args.num_workers,
-                pin_memory=args.pin_mem,
-                drop_last=False,
-            )
-
-
-            ds_test = TensorDataset(X_test, Y_test)
-            dl_val = torch.utils.data.DataLoader(
-                ds_test, shuffle=False,
-                batch_size=args.batch_size,
-                num_workers=args.num_workers,
-                pin_memory=args.pin_mem,
-                drop_last=False
-            )
-
-        if args.distributed:
-            dl_train.sampler.set_epoch(epoch)
-        print(f"{epoch=}")
-
-        train_stats = train_one_epoch(
-            classifier, criterion, dl_train,
-            optimizer, device, epoch, loss_scaler,
-            max_norm=None,
-            log_writer=log_writer,
-            args=args
-        )
-
-        test_stats = evaluate(dl_val, classifier, device, return_targets_and_preds=True)
-
-        test_targets = test_stats.pop("targets")
-        test_preds = test_stats.pop("preds")
-
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        max_accuracy = max(max_accuracy, test_stats["acc1"])
-        print(f'Max accuracy: {max_accuracy:.2f}%')
-
-        lin_pf = f"test_linear_{args.cls_features}"
-        if args.shuffle_subsets > 1:
-            lin_pf = f"{lin_pf}_ss{args.shuffle_subsets}"
-        if args.num_block is not None:
-            lin_pf = f"{lin_pf}_nb{args.num_block}"
-
-
-        if log_writer is not None:
-            log_writer.add_scalar(f'{lin_pf}/test_acc1', test_stats['acc1'], epoch)
-            log_writer.add_scalar(f'{lin_pf}/test_acc5', test_stats['acc5'], epoch)
-            log_writer.add_scalar(f'{lin_pf}/test_loss', test_stats['loss'], epoch)
-            for k, v in train_stats.items():
-                if isinstance(v, float):
-                    log_writer.add_scalar(f"{lin_pf}/train_{k}", v, epoch)
-
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch,
-                     'n_parameters': n_parameters}
-
-        if args.output_dir and misc.is_main_process():
-            if log_writer is not None:
-                log_writer.flush()
-            with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-                f.write(json.dumps(log_stats) + "\n")
-
-    if args.shuffle_subsets == 1:
-        outputs = {
-            "targets": test_targets,
-            "preds": test_preds,
-            "attentions": A_test,
-            "magnitudes": M_test,
-        }
-        torch.save(outputs, Path(args.output_dir) / f"outputs_linprobe_{args.cls_features}:{args.cca_bias}.pth")
-
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
-
-
 
 def collect_features(
         model: models_vit.VisionTransformer, loader: torch.utils.data.DataLoader,
@@ -621,11 +422,6 @@ def collect_features(
             magn_list.append(magn_stats.detach().cpu())
 
 
-            # debugging only!
-            # # TODO
-            # if i > 2:
-            #     break
-
     features = torch.cat(features, dim=0)
     labels = torch.cat(labels, dim=0).long()
 
@@ -633,41 +429,6 @@ def collect_features(
     magns_list = torch.cat(magn_list, dim=0)
 
     return features, labels, attns_list, magns_list
-
-class AggHead(nn.Module):
-    def __init__(self, mlp: nn.Linear, agg_method: str):
-        super().__init__()
-        self.bn = torch.nn.BatchNorm1d(mlp.in_features, affine=False, eps=1e-6)
-        self.mlp = mlp
-        self.agg_method = agg_method
-
-    def forward(self, X):
-        B, D = X.shape
-
-        # print(X.shape)
-        if self.agg_method == "rep":
-            # X = X.mean(dim = 1)
-            Z = self.mlp(self.bn(X))
-            return Z
-
-        elif self.agg_method == "log":
-            # X = X.reshape(B*S, D)
-            # assert False, X.shape
-            Z = self.mlp(self.bn(X))
-            # assert False, Z.shape
-            # Z = Z.reshape(B, S, Z.shape[-1])
-            # Z = Z.mean(dim=1)
-            # assert False, Z.shape
-            return Z
-
-        if self.agg_method == "t1":
-            # X = X[:, 0]  # take the first of the shuffled representations
-            Z = self.mlp(self.bn(X))
-            return Z
-
-        raise NotImplementedError(self.agg_method)
-
-
 
 if __name__ == '__main__':
     args = get_args_parser()

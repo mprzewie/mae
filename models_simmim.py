@@ -1,11 +1,3 @@
-# --------------------------------------------------------
-# SimMIM
-# Copyright (c) 2021 Microsoft
-# Licensed under The MIT License [see LICENSE for details]
-# Based on BEIT code bases (https://github.com/microsoft/unilm/tree/master/beit)
-# Written by Yutong Lin, Zhenda Xie
-# --------------------------------------------------------
-
 import math
 from functools import partial
 
@@ -142,14 +134,6 @@ class Block(nn.Module):
         else:
             self.gamma_1, self.gamma_2 = None, None
 
-    # def forward(self, x, rel_pos_bias=None):
-    #     if self.gamma_1 is None:
-    #         x = x + self.drop_path(self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
-    #         x = x + self.drop_path(self.mlp(self.norm2(x)))
-    #     else:
-    #         x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias))
-    #         x = x + self.drop_path(self.gamma_2 * self.mlp(self.norm2(x)))
-    #     return x
 
     def forward(self, x: torch.Tensor, rel_pos_bias=None, return_attention=False) -> torch.Tensor:
         y, attention = self.attn(self.norm1(x), rel_pos_bias=rel_pos_bias)

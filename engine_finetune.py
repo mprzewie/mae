@@ -1,13 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# DeiT: https://github.com/facebookresearch/deit
-# BEiT: https://github.com/microsoft/unilm/tree/master/beit
-# --------------------------------------------------------
 
 import math
 import sys
@@ -24,7 +14,7 @@ from tqdm import tqdm
 
 import util.misc as misc
 import util.lr_sched as lr_sched
-from engine_pretrain import AMP_PRECISIONS
+from util.misc import AMP_PRECISIONS
 from models_mae import MaskedAutoencoderViT
 from models_simmim import VisionTransformerSimMIM
 from models_vit import VisionTransformer
