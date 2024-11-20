@@ -15,7 +15,6 @@ from tqdm import tqdm
 import util.misc as misc
 import util.lr_sched as lr_sched
 from util.misc import AMP_PRECISIONS
-from models_mae import MaskedAutoencoderViT
 from models_simmim import VisionTransformerSimMIM
 from models_vit import VisionTransformer
 
@@ -107,7 +106,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 @torch.no_grad()
 def evaluate(
         data_loader,
-        model: Union[MaskedAutoencoderViT, VisionTransformer],
+        model: VisionTransformer,
         device, *,
         return_targets_and_preds: bool = False, cls_features: str = "cls",
         return_block: Optional[int] = None
@@ -166,54 +165,3 @@ def evaluate(
 
     return stats
 
-
-
-@torch.no_grad()
-def calculate_effrank(data_loader, model: MaskedAutoencoderViT, device):
-    Xs = []
-    for val_img, _ in data_loader:
-        val_img = val_img.to(device)
-        latent, mask, ids_restore, (x_blocks, attn) = model.forward_encoder(val_img, mask_ratio=0)
-        cls_features = latent[:, 0]
-        Xs.append(cls_features.detach().cpu().numpy())
-
-    Xs = np.concatenate(Xs, axis=0)
-    U, D, V = np.linalg.svd(Xs)
-    D_l1 = np.abs(D).sum()
-    P = D / D_l1
-    H = P * np.log(P)
-    effrank = np.exp(-H.sum())
-    return effrank
-
-@torch.no_grad()
-def calculate_cls_cls_attention(data_loader, model: MaskedAutoencoderViT, device):
-    cls_cls_attns = []
-    with torch.no_grad():
-        for (data, target) in tqdm(data_loader, desc="cls cls attn"):
-            latent, mask, ids_restore, (x_blocks, attns) = model.forward_encoder(data.to(device), mask_ratio=0)
-
-            cls_cls_attn = attns[:, :, :, 0, 0].detach().cpu() # batch, blocks, heads
-            cls_cls_attns.append(cls_cls_attn)
-
-    cls_cls_attns = torch.cat(cls_cls_attns, dim=0)
-    cls_cls_attns = cls_cls_attns.mean(dim=(0, 2))
-    return cls_cls_attns
-
-
-@torch.no_grad()
-def draw_mae_predictions(dataset, model: MaskedAutoencoderViT, device):
-    val_img = torch.stack([dataset[i][0] for i in range(16)]).to(device)
-    mae_loss, pred, mask, (cls_feats, outputs, latent, ids_restore, latent_pred) = model.forward(val_img)
-    pred_img = model.unpatchify(pred)
-
-    d_input = torch.cat([latent[:, :1], latent_pred], 1)
-
-    latent_pred_img_p = model.forward_decoder(d_input, ids_restore)
-    latent_pred_img = model.unpatchify(latent_pred_img_p)
-
-    patched_img = model.patchify(val_img)
-    masked_patched_img = patched_img * (mask.unsqueeze(2) - 1) * (-1)
-    masked_img = model.unpatchify(masked_patched_img)
-    img = torch.cat([val_img, masked_img, pred_img, latent_pred_img], dim=0)
-    img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=4)
-    return img

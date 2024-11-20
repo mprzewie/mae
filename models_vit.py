@@ -58,10 +58,9 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        # self.register_buffer("cls_bias", torch.zeros(1))
-        # assert False, self.cls_bias
 
-        self.cls_bias = None #torch.zeros(num_heads).cuda() if torch.cuda.is_available() else torch.zeros(num_heads)# TODO maybe a register
+
+        # self.cls_bias = None
 
     def forward(self, x: torch.Tensor, temperature: float=1) -> torch.Tensor:
         s0 = time()
@@ -83,31 +82,10 @@ class Attention(nn.Module):
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
 
-            # s = time()
-            if self.cls_bias is not None:
-                cb = self.cls_bias #.to(attn.device)
-                # t1 = time()
-
-                attn[:, :, 0, 0] += cb
-                # t2 = time()
-                # attn[:, :, 0, 0] = attn[:, :, 0, 0].clamp(0 , 1)
-                attn = attn.clamp(0, 1)
-                # t3 = time()
-
-                target_non_cc_weight = 1 - attn[:, :, 0, 0]
-                actual_non_cc_weight = attn[:, :, 0, 1:].sum(dim=2)
-                epsilon = 1e-6
-                mp = target_non_cc_weight / (actual_non_cc_weight + epsilon)
-
-                attn[:, :, 0, 1:] *= mp.unsqueeze(2)
-                attn = attn.clamp(0, 1)
-
             x = attn @ v
             x = x.transpose(1, 2).reshape(B, N, C)
             x = self.proj(x)
             x = self.proj_drop(x)
-            # sattn = time()
-            # print("attn total", sattn - s0)
             return x, attn
 
 
@@ -192,7 +170,6 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             **kwargs
         )
 
-        # self.global_pool = global_pool
         if self.global_pool == "avg":
             norm_layer = kwargs['norm_layer']
             embed_dim = kwargs['embed_dim']
@@ -222,7 +199,6 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             assert return_features in ["cls", "raw", "pos"]
 
         return_block = return_block or len(self.blocks) - 1
-        # assert shuffle_subsets == 1, shuffle_subsets
         orig_x = x
         B = x.shape[0]
         x = self.patch_embed(x)
@@ -282,24 +258,12 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
                 attn_stats = attn_stats.unsqueeze(2)
 
-                # assert False, attn_stats.shape
                 attentions.append(attn_stats.detach())
                 magnitudes.append(magn.unsqueeze(2).detach())
 
             if b_id == return_block:
                 break
 
-            # if self.block_reshuffling:
-            #     x_n_s_cl_d = x.reshape(B, shuffle_subsets, (L // shuffle_subsets) + 1, D)
-            #     x_cls = x_n_s_cl_d[:, :, :1]
-            #     x_pos = x_n_s_cl_d[:, :, 1:].reshape(B, L, D)
-            #     noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
-            #     ids_shuffle = torch.argsort(noise, dim=1)
-            #     x_pos_shuffled = torch.gather(x_pos, dim=1, index=ids_shuffle.unsqueeze(-1).repeat(1, 1, D))
-            #     x_pos_shuffled = x_pos_shuffled.reshape(B, shuffle_subsets, L // shuffle_subsets, D)
-            #     x = torch.cat([x_cls, x_pos_shuffled], dim=2).reshape(
-            #         B * shuffle_subsets, (L // shuffle_subsets) + 1, D
-            #     )
 
         x_n_s_cl_d = x.reshape(
             B, shuffle_subsets, (L//shuffle_subsets)+(1 if self.global_pool=="token" else 0), D)
@@ -465,42 +429,6 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             fm_mul = fm * mul
             ret = fm_mul.sum(dim=1)
-
-            # mul_fm = mul.reshape(len(orig_x),14,14)
-
-            # bipartition_fm = bipartition.reshape(len(orig_x),14,14)
-            # eigen_fm = eigen_softmax.reshape(len(orig_x),14,14)
-
-            # fg_t_std = masked_tensor(fm, fm==1).std(dim=1).mean(dim=1)
-            # bg_t_std = masked_tensor(fm, fm==0).std(dim=1).mean(dim=1)
-
-            # assert False, fg_t.shape
-
-
-            # fg_std = fm[barr, bipartition_fm==1, :].std(dim=1, keepdim=True)
-            # bg_std = fm[barr, bipartition_fm==0, :].std(dim=1, keepdim=True)
-
-            # assert False, [fg_std.shape, bg_std.shape]
-
-
-            # import matplotlib.pyplot as plt
-            # rows, cols = (len(orig_x), 3)
-            #
-            # fig, ax = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2.5))
-            # for b in range(rows):
-            #     ax[b, 0].imshow(orig_x[b].permute(1,2,0).cpu() + 0.5)
-            #     ax[b, 1].imshow(mul_fm[b].cpu())
-            #     ax[b, 2].imshow(mul_fm[b].cpu())
-            #     import seaborn as sns
-            #     sns.heatmap(mul_fm[b].cpu(), ax=ax[b, 2])
-            #     ax[b, 1].set_title(f"bp fgs {fg_std_m[b].item():.3}", fontsize="xx-small")
-            #     ax[b, 2].set_title(f"eig bgs {bg_std_m[b].item():.3}", fontsize="xx-small")
-            #
-            # plt.show()
-            # assert False
-
-
-            # assert False, (orig_x.shape, bipartition.shape, eigen.shape)
 
         else:
             raise NotImplementedError(return_features)

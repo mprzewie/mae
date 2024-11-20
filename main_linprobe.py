@@ -65,10 +65,7 @@ def get_args_parser():
     # * Finetuning params
     parser.add_argument('--finetune', default='',
                         help='finetune from checkpoint')
-    # parser.add_argument('--global_pool', action='store_true')
-    # parser.set_defaults(global_pool=False)
-    # parser.add_argument('--cls_token', action='store_false', dest='global_pool',
-    #                     help='Use class token instead of global pool for classification')
+
     parser.add_argument("--cls_features",
                         choices=CLS_FT_CHOICES,
                         default="cls", help="cls token / positional tokens for classification")
@@ -83,8 +80,7 @@ def get_args_parser():
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
-    # parser.add_argument('--log_dir', default='./output_dir',
-    #                     help='path where to tensorboard log')
+
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
@@ -115,8 +111,6 @@ def get_args_parser():
                         help="See: https://github.com/pytorch/pytorch/issues/101850#issuecomment-1717363898")
     parser.add_argument("--amp", default="float16", choices=list(AMP_PRECISIONS.keys()), type=str)
 
-
-    ####
     parser.add_argument("--no_cls_token", action='store_true', default=False,
                         help="Disable CLS token (e.g. for I-JEPA). You still have to select appropriate --cls_features"
                         )
@@ -176,8 +170,6 @@ def main(args):
         dataset_train = STL10(args.data_path, split="train", transform=transform_train, download=True)
         dataset_val = STL10(args.data_path, split='test', transform=transform_val, download=True)
 
-    print(dataset_train)
-    print(dataset_val)
 
     if args.distributed:
         num_tasks = misc.get_world_size()
@@ -247,10 +239,6 @@ def main(args):
         )
 
     if args.finetune and not args.eval and not args.simmim:
-        # checkpoint = torch.load(args.finetune, map_location='cpu')
-
-        # print("Load pre-trained checkpoint from: %s" % args.finetune)
-        # checkpoint_model = checkpoint['model']
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
             checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
@@ -285,20 +273,12 @@ def main(args):
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
 
-        # if args.global_pool:
-        #     assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        # else:
 
         assert all([
             k.startswith("head") or k.startswith("oracle") or k.startswith("fc")
             for k in msg.missing_keys
         ]), sorted(msg.missing_keys)
 
-        # manually initialize fc layer: following MoCo v3
-        # trunc_normal_(model.head.weight, std=0.01)
-
-    # for linear prob only
-    # hack: revise model's head with BN
 
     if args.cls_features.startswith("abmilp"):
         abmilp = ABMILPHead(
@@ -329,7 +309,6 @@ def main(args):
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    # print("Model = %s" % str(model_without_ddp))
     print('number of params (M): %.2f' % (n_parameters / 1.e6))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
@@ -401,14 +380,6 @@ def main(args):
             log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc1', test_stats['acc1'], epoch)
             log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc5', test_stats['acc5'], epoch)
             log_writer.add_scalar(f'test_v1_{args.cls_features}/test_loss', test_stats['loss'], epoch)
-
-
-
-        # if args.output_dir and misc.is_main_process():
-        #     if log_writer is not None:
-        #         log_writer.flush()
-        #     with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-        #         f.write(json.dumps(log_stats) + "\n")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
