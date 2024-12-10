@@ -33,6 +33,7 @@ import models_simmim
 
 import util.misc as misc
 from abmilp import ABMILPHead
+from attentive import AttentiveHead
 from engine_pretrain import AMP_PRECISIONS
 from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
@@ -145,6 +146,7 @@ def get_args_parser():
                         help="what to condition abmilp with?")
 
     parser.add_argument("--abmilp_content", type=str, choices=["all", "patch"], default="all")
+    parser.add_argument("--attentive_heads", type=int, default=12)
 
     parser.add_argument("--suffix", type=str, default="")
 
@@ -320,10 +322,20 @@ def main(args):
                 cond=args.abmilp_cond,
                 content=args.abmilp_content,
                 num_patches=model.patch_embed.num_patches,
-
+                num_heads=args.attentive_heads,
             )
         model.head = torch.nn.Sequential(
             abmilp,
+            torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+            model.head
+        )
+    elif args.cls_features.startswith("attentive"):
+        attentive = AttentiveHead(
+            embed_dim=model.head.in_features,
+            num_heads=args.attentive_heads,
+        )
+        model.head = torch.nn.Sequential(
+            attentive,
             torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
             model.head
         )

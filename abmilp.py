@@ -21,7 +21,7 @@ class ABMILPHead(nn.Module):
             cond: str="none",
             content: str = "all",
             num_patches: Optional[int] = None,
-
+            num_heads: Optional[int] = 8,
         ):
         super().__init__()
 
@@ -35,7 +35,7 @@ class ABMILPHead(nn.Module):
             requires_grad=False
         )
 
-        self.self_attn = Attention(dim) if self.self_attention_apply_to != "none" else nn.Identity()
+        self.self_attn = Attention(dim, num_heads=num_heads) if self.self_attention_apply_to != "none" else nn.Identity()
 
 
         self.ATTENTION_BRANCHES = 1

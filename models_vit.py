@@ -34,7 +34,7 @@ CLS_FT_CHOICES = [
         "tcut-eig", "tcut-eig-f",
         "tcut-eigbip", "tcut-eigbip-f",
         "tcut-eigsft", "tcut-eigsft-f",
-        "abmilp"
+        "abmilp", "attentive",
     ]
 
 HUB_KEY_TO_URL = {
@@ -524,7 +524,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
     def forward(self, x: torch.Tensor, return_features: str = "cls", return_block: Optional[int] = None) -> torch.Tensor:
-        if return_features.startswith("abmilp"):
+        if return_features.startswith("abmilp") or return_features.startswith("attentive"):
             return_features = "raw"
 
         x, attn, magnitudes = self.forward_features(
