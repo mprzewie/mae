@@ -364,7 +364,7 @@ class VisionTransformerSimMIM(nn.Module):
         return ret, attentions, magnitudes
 
     def forward(self, x: torch.Tensor, return_features: str = "cls", return_block=12) -> torch.Tensor:
-        if return_features.startswith("abmilp"):
+        if return_features.startswith("abmilp") or return_features.startswith("attentive"):
             return_features = "raw"
 
         x, attn, magnitudes = self.forward_features(x, return_features=return_features, return_block=return_block)
