@@ -54,6 +54,7 @@ from util.crop import RandomResizedCrop
 
 import models_vit
 import models_simmim
+import models_vits_dinov2
 from engine_finetune import train_one_epoch, evaluate
 
 
@@ -73,6 +74,8 @@ def get_args_parser():
     parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
     parser.add_argument("--simmim", action="store_true", default=False)
+    parser.add_argument("--dinov2", action="store_true", default=False)
+
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0 for linear probe following MoCo v1)')
@@ -245,6 +248,9 @@ def main(args):
     }
     if args.simmim:
         model = models_simmim.__dict__[args.model]()
+    elif args.dinov2:
+        model = models_vits_dinov2.vit_base(patch_size=14, block_chunks=0, img_size=args.input_size, init_values=1)
+        model.head = nn.Linear(768, args.nb_classes)
     else:
         model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
             num_classes=args.nb_classes,
@@ -260,7 +266,7 @@ def main(args):
 
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
-            checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+            checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key] if not args.dinov2 else  torch.load(args.finetune, map_location='cpu')
 
         elif args.finetune.startswith("hub"):
             state_dict = torch.hub.load_state_dict_from_url(
@@ -584,7 +590,13 @@ def collect_features(
                     enabled=args.amp != "none",
                     dtype=AMP_PRECISIONS[args.amp]
             ):
-                z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features, return_block=return_block)
+                if isinstance(model, models_vits_dinov2.DinoVisionTransformer):
+                    dct = model.forward_features(data.to(device))
+                    z = dct["x_norm_clstoken"]
+                    attns = torch.ones(5, len(z), 12, 12, 768).to(device)
+                    magnitudes = torch.ones(2, len(z), 12, 768)
+                else:
+                    z, attns, magnitudes = model.forward_features(data.to(device), shuffle_subsets=shuffle_subsets, return_features=return_features, return_block=return_block)
 
             cls_cls_attns = attns[0, :, :, :, :1]
             pos_self_attns = attns[0, :, :, :, 1:].mean(dim=3, keepdim=True)

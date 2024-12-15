@@ -28,6 +28,7 @@ from engine_pretrain import AMP_PRECISIONS
 from models_mae import MaskedAutoencoderViT
 from models_simmim import VisionTransformerSimMIM
 from models_vit import VisionTransformer
+from models_vits_dinov2 import DinoVisionTransformer
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
@@ -65,7 +66,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 dtype=AMP_PRECISIONS[args.amp]
         ):
             model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
-            if isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM)):
+            if isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM, DinoVisionTransformer)):
                 outputs = model(samples, return_features=args.cls_features, return_block=args.return_block)
             else:
                 outputs = model(samples)
@@ -144,7 +145,7 @@ def evaluate(
             if isinstance(model_wo_ddp, MaskedAutoencoderViT):
                 assert return_block is None, f"{return_block=} not used"
                 _, _, _, (_, output, _, _, _) = model.forward(images, cls_features)
-            elif isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM)):
+            elif isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM, DinoVisionTransformer)):
                 output = model.forward(images, return_features=cls_features, return_block=return_block)
             else:
                 assert return_block is None, f"{return_block=} not used"

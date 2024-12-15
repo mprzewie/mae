@@ -19,6 +19,10 @@ from pathlib import Path
 
 import torch
 import torch.backends.cudnn as cudnn
+from timm.models import load_state_dict_from_hf
+from timm.models.vision_transformer import vit_base_patch14_dinov2
+from torch import nn
+from torch.hub import load_state_dict_from_url
 from torch.optim import SGD
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
@@ -28,6 +32,7 @@ import timm
 from torchvision.datasets import STL10
 
 import models_simmim
+import models_vits_dinov2
 # assert timm.__version__ == "0.3.2" # version check
 # from timm.models.layers import trunc_normal_
 
@@ -57,7 +62,7 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='vit_large_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
-
+    parser.add_argument('--input_size', default=224, type=int, help='images input size')
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0 for linear probe following MoCo v1)')
@@ -132,6 +137,8 @@ def get_args_parser():
     parser.add_argument("--no_cls_token", action='store_true', default=False,
                         help="Disable CLS token (e.g. for I-JEPA). You still have to select appropriate --cls_features"
                         )
+
+    parser.add_argument("--dinov2", action='store_true', default=False)
     parser.add_argument("--simmim", action="store_true", default=False)
 
     parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh",
@@ -171,13 +178,13 @@ def main(args):
 
     # linear probe: weak augmentation
     transform_train = transforms.Compose([
-            RandomResizedCrop(224, interpolation=3),
+            RandomResizedCrop(args.input_size, interpolation=3),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     transform_val = transforms.Compose([
             transforms.Resize(256, interpolation=3),
-            transforms.CenterCrop(224),
+            transforms.CenterCrop(args.input_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
@@ -250,6 +257,16 @@ def main(args):
         model = models_simmim.__dict__[args.model](
             checkpoint_path=args.finetune
         )
+    elif args.dinov2:
+        dv2_arch, dv2_patch = args.model.split("_patch")
+        model = models_vits_dinov2.__dict__[dv2_arch](
+            patch_size=dv2_patch,
+            block_chunks=0,
+            img_size=args.input_size,
+            init_values=1e-5
+        )
+        model.head = nn.Linear(model.embed_dim, args.nb_classes)
+
     else:
         cls_kwargs = dict()
         if "huge" in args.model:
@@ -266,20 +283,26 @@ def main(args):
         # checkpoint_model = checkpoint['model']
         if Path(args.finetune).exists():
             print("Interpreting", args.finetune, "as path")
-            checkpoint_model = torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+            checkpoint_model = (
+                torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
+                if not args.dinov2
+                else torch.load(args.finetune, map_location='cpu')
+            )
+
         else:
             print("Interpreting", args.finetune, "as timm model")
             from timm.models.vision_transformer import _create_vision_transformer
 
-            model_to_kwargs = {
-                "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
-                "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
-                "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
-                "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
-                "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
-            }
-            model_kwargs = model_to_kwargs[args.model]
-            checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_kwargs).state_dict()
+            # model_to_kwargs = {
+            #     "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
+            #     "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
+            #     "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
+            #     "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
+            #     "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
+            # }
+            # model_kwargs = model_to_kwargs[args.model]
+            # checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_kwargs).state_dict()
+            checkpoint_model = load_state_dict_from_hf(f'timm/{args.finetune}')
 
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
@@ -303,7 +326,7 @@ def main(args):
         # else:
 
         assert all([
-            k.startswith("head") or k.startswith("oracle") or k.startswith("fc")
+            k.startswith("head") or k.startswith("oracle") or k.startswith("fc") or k.startswith("mask")
             for k in msg.missing_keys
         ]), sorted(msg.missing_keys)
 
