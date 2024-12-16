@@ -260,7 +260,7 @@ def main(args):
     elif args.dinov2:
         dv2_arch, dv2_patch = args.model.split("_patch")
         model = models_vits_dinov2.__dict__[dv2_arch](
-            patch_size=dv2_patch,
+            patch_size=int(dv2_patch),
             block_chunks=0,
             img_size=args.input_size,
             init_values=1e-5
