@@ -452,7 +452,7 @@ class DinoVisionTransformer(nn.Module):
             return self.head(ret["x_norm_clstoken"])
         elif return_features == "pos":
             return self.head(ret["x_norm_patchtoken"])
-        elif return_features in ["raw", "abmilp"]:
+        elif return_features in ["raw", "abmilp", "attentive"]:
             return self.head(ret["x_prenorm"])
 
         assert False, return_features
