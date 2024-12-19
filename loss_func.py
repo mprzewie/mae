@@ -36,15 +36,22 @@ def uniformity_loss_TCR(features, uniformity_mu=1., centering=False):
     return loss
 
 
-class TCRLoss(nn.Module):
-    def __init__(self, uniformity_mu=1., centering=False):
+class UniformityLoss(nn.Module):
+    def __init__(self, uniformity_mu=1., centering=False, implementation: str="mmae"):
         super().__init__()
         self.uniformity_mu = uniformity_mu
         self.centering = centering
+        self.implementation = implementation
+
 
     def forward(self, features, labels):
         # labels are ignored
-        return uniformity_loss_TCR(features, uniformity_mu=self.uniformity_mu, centering=self.centering)
+        if self.implementation == "mmae":
+            return uniformity_loss_TCR(features, uniformity_mu=self.uniformity_mu, centering=self.centering)
+        elif self.implementation == "umae":
+            return uniformity_loss(features)
+
+        raise NotImplementedError(self.implementation)
 
 class ClsPosLoss(nn.Module):
     def __init__(
@@ -133,5 +140,6 @@ class GatherLayer(torch.autograd.Function):
     def backward(ctx, *grads):
         (input,) = ctx.saved_tensors
         grad_out = torch.zeros_like(input)
-        grad_out[:] = grads[dist.get_rank()]
+        rank = dist.get_rank() if (dist.is_available() and dist.is_initialized()) else 0
+        grad_out[:] = grads[rank]
         return grad_out

@@ -42,7 +42,7 @@ import util.misc as misc
 from abmilp import ABMILPHead
 from attentive import AttentiveHead
 from engine_pretrain import AMP_PRECISIONS
-from loss_func import TCRLoss
+from loss_func import UniformityLoss
 from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -157,9 +157,10 @@ def get_args_parser():
                         help="what to condition abmilp with?")
 
     parser.add_argument("--abmilp_content", type=str, choices=["all", "patch"], default="all")
+    parser.add_argument("--abmilp_head_checkpoint", type=Path, default=None)
     parser.add_argument("--attentive_heads", type=int, default=12)
 
-    parser.add_argument("--objective", choices=["classification", "uniformity"], default="classification")
+    parser.add_argument("--objective", choices=["classification", "ssl-mmae", "ssl-umae"], default="classification")
 
     parser.add_argument("--suffix", type=str, default="")
 
@@ -344,6 +345,9 @@ def main(args):
 
     # for linear prob only
     # hack: revise model's head with BN
+    if args.abmilp_head_checkpoint is not None:
+        assert args.cls_features.startswith("abmilp"), args.cls_features
+        assert args.objective == "classification", args.objective
 
     if args.cls_features.startswith("abmilp"):
         abmilp = ABMILPHead(
@@ -361,7 +365,18 @@ def main(args):
             torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head
         ] if args.objective == "classification" else []
 
-        model.head = torch.nn.Sequential(abmilp, *head_end)
+        head = torch.nn.Sequential(abmilp, *head_end)
+
+        if args.abmilp_head_checkpoint is not None:
+            print("Loading abmilp head from checkpoint")
+            head_ckpt = torch.load(args.abmilp_head_checkpoint, map_location='cpu')
+            print(head_ckpt["model"].keys())
+            msg = head.load_state_dict(head_ckpt["model"], strict=False)
+            print(msg)
+            assert len(msg.unexpected_keys) == 0, msg.unexpected_keys
+            assert not any([k.startswith("0.") for k in msg.missing_keys]), msg.missing_keys
+
+        model.head = head
 
     elif args.cls_features.startswith("attentive"):
         attentive = AttentiveHead(
@@ -378,9 +393,12 @@ def main(args):
     # freeze all but the head
     for _, p in model.named_parameters():
         p.requires_grad = False
-    for _, p in model.head.named_parameters():
+    for n, p in model.head.named_parameters():
         p.requires_grad = True
+        if args.abmilp_head_checkpoint is not None and n.startswith("0."):
+            p.requires_grad = False # if AbMILP is pre-loaded, don't optimize it
 
+    print(model.head)
     model.to(device)
 
     model_without_ddp = model
@@ -404,21 +422,31 @@ def main(args):
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
 
+    params_to_optimize = {
+        k: v for k, v in model.named_parameters()
+        if v.requires_grad
+    }
+    print("Optimizing", params_to_optimize.keys())
+
     if args.optimizer == "lars":
-        optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = LARS(params_to_optimize.values(), lr=args.lr, weight_decay=args.weight_decay)
     else:
-        optimizer = SGD(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = SGD(params_to_optimize.values(), lr=args.lr, weight_decay=args.weight_decay)
 
     print(optimizer)
     loss_scaler = NativeScaler()
 
     if args.objective == "classification":
         criterion = torch.nn.CrossEntropyLoss()
-    elif args.objective == "uniformity":
+    elif args.objective.startswith("ssl"):
         assert args.cls_features == "abmilp", args.cls_features
-        criterion = TCRLoss()
+        _, ssl_impl = args.objective.split("-")
+        print(f"{ssl_impl=}")
+        criterion = UniformityLoss(implementation=ssl_impl)
+    else:
+        raise NotImplementedError(args.objective)
 
-    print("criterion = %s" % str(criterion))
+    print(f"{criterion=}")
 
     # misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
@@ -441,6 +469,7 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
+        # train_stats=dict(loss=0)
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
@@ -462,7 +491,7 @@ def main(args):
 
         else:
             if log_writer is not None:
-                log_writer.add_scalar(f'ft_uniform_{args.cls_features}/train_loss', train_stats['loss'], epoch)
+                log_writer.add_scalar(f'ft_{args.objective}_{args.cls_features}/train_loss', train_stats['loss'], epoch)
 
         if args.output_dir:
             misc.save_model(
