@@ -12,6 +12,8 @@
 import argparse
 import datetime
 import json
+from random import choices
+
 import numpy as np
 import os
 import time
@@ -40,6 +42,7 @@ import util.misc as misc
 from abmilp import ABMILPHead
 from attentive import AttentiveHead
 from engine_pretrain import AMP_PRECISIONS
+from loss_func import TCRLoss
 from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -105,8 +108,8 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--resume', default='',
-                        help='resume from checkpoint')
+    # parser.add_argument('--resume', default='',
+    #                     help='resume from checkpoint')
 
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
@@ -138,8 +141,9 @@ def get_args_parser():
                         help="Disable CLS token (e.g. for I-JEPA). You still have to select appropriate --cls_features"
                         )
 
-    parser.add_argument("--dinov2", action='store_true', default=False)
-    parser.add_argument("--simmim", action="store_true", default=False)
+    parser.add_argument("--vit_impl", choices=["mae", "simmim", "dinov2"], default="mae")
+    # parser.add_argument("--dinov2", action='store_true', default=False)
+    # parser.add_argument("--simmim", action="store_true", default=False)
 
     parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh",
                         help="abmilp activation function"
@@ -154,6 +158,8 @@ def get_args_parser():
 
     parser.add_argument("--abmilp_content", type=str, choices=["all", "patch"], default="all")
     parser.add_argument("--attentive_heads", type=int, default=12)
+
+    parser.add_argument("--objective", choices=["classification", "uniformity"], default="classification")
 
     parser.add_argument("--suffix", type=str, default="")
 
@@ -253,11 +259,20 @@ def main(args):
         drop_last=False,
         worker_init_fn=worker_init_fn if args.dataloader_affinity_hack else None
     )
-    if args.simmim:
+
+    if args.vit_impl == "mae":
+        cls_kwargs = dict()
+        if "huge" in args.model:
+            cls_kwargs["class_token"] = not args.no_cls_token
+        model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
+            num_classes=args.nb_classes,
+            **cls_kwargs
+        )
+    elif args.vit_impl == "simmim":
         model = models_simmim.__dict__[args.model](
             checkpoint_path=args.finetune
         )
-    elif args.dinov2:
+    elif args.vit_impl == "dinov2":
         dv2_arch, dv2_patch = args.model.split("_patch")
         model = models_vits_dinov2.__dict__[dv2_arch](
             patch_size=int(dv2_patch),
@@ -266,17 +281,11 @@ def main(args):
             init_values=1e-5
         )
         model.head = nn.Linear(model.embed_dim, args.nb_classes)
-
     else:
-        cls_kwargs = dict()
-        if "huge" in args.model:
-            cls_kwargs["class_token"] = not args.no_cls_token
-        model: models_vit.VisionTransformer = models_vit.__dict__[args.model](
-            num_classes=args.nb_classes,
-            **cls_kwargs
-        )
+        raise NotImplementedError(args.vit_impl)
 
-    if args.finetune and not args.eval and not args.simmim:
+
+    if args.finetune and not args.eval and not args.vit_impl != "simmim":
         # checkpoint = torch.load(args.finetune, map_location='cpu')
 
         # print("Load pre-trained checkpoint from: %s" % args.finetune)
@@ -285,7 +294,7 @@ def main(args):
             print("Interpreting", args.finetune, "as path")
             checkpoint_model = (
                 torch.load(args.finetune, map_location='cpu')[args.checkpoint_key]
-                if not args.dinov2
+                if args.vit_impl == "mae"
                 else torch.load(args.finetune, map_location='cpu')
             )
 
@@ -347,11 +356,13 @@ def main(args):
                 num_patches=model.patch_embed.num_patches,
                 num_heads=args.attentive_heads,
             )
-        model.head = torch.nn.Sequential(
-            abmilp,
-            torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-            model.head
-        )
+
+        head_end = [
+            torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head
+        ] if args.objective == "classification" else []
+
+        model.head = torch.nn.Sequential(abmilp, *head_end)
+
     elif args.cls_features.startswith("attentive"):
         attentive = AttentiveHead(
             embed_dim=model.head.in_features,
@@ -401,16 +412,20 @@ def main(args):
     print(optimizer)
     loss_scaler = NativeScaler()
 
-    criterion = torch.nn.CrossEntropyLoss()
+    if args.objective == "classification":
+        criterion = torch.nn.CrossEntropyLoss()
+    elif args.objective == "uniformity":
+        assert args.cls_features == "abmilp", args.cls_features
+        criterion = TCRLoss()
 
     print("criterion = %s" % str(criterion))
 
-    misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
+    # misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
-    if args.eval:
-        test_stats = evaluate(data_loader_val, model, device)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        exit(0)
+    # if args.eval:
+    #     test_stats = evaluate(data_loader_val, model, device)
+    #     print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+    #     exit(0)
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
@@ -426,29 +441,33 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        test_stats = evaluate(data_loader_val, model, device, cls_features=args.cls_features, return_block=args.return_block)
-
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
+
+        if args.objective == "classification":
+            test_stats = evaluate(data_loader_val, model, device, cls_features=args.cls_features, return_block=args.return_block)
+            log_stats.update(test_stats)
+
+            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            max_accuracy = max(max_accuracy, test_stats["acc1"])
+            print(f'Max accuracy: {max_accuracy:.2f}%')
+
+            if log_writer is not None:
+                log_writer.add_scalar(f'test_v1_{args.cls_features}/train_acc1', train_stats['acc1'], epoch)
+                log_writer.add_scalar(f'test_v1_{args.cls_features}/train_loss', train_stats['loss'], epoch)
+                log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc1', test_stats['acc1'], epoch)
+                log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc5', test_stats['acc5'], epoch)
+                log_writer.add_scalar(f'test_v1_{args.cls_features}/test_loss', test_stats['loss'], epoch)
+
+        else:
+            if log_writer is not None:
+                log_writer.add_scalar(f'ft_uniform_{args.cls_features}/train_loss', train_stats['loss'], epoch)
+
         if args.output_dir:
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp.head, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch, test_stats=log_stats, include_epoch_in_filename=False)
-
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        max_accuracy = max(max_accuracy, test_stats["acc1"])
-        print(f'Max accuracy: {max_accuracy:.2f}%')
-
-        if log_writer is not None:
-            log_writer.add_scalar(f'test_v1_{args.cls_features}/train_acc1', train_stats['acc1'], epoch)
-            log_writer.add_scalar(f'test_v1_{args.cls_features}/train_loss', train_stats['loss'], epoch)
-            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc1', test_stats['acc1'], epoch)
-            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc5', test_stats['acc5'], epoch)
-            log_writer.add_scalar(f'test_v1_{args.cls_features}/test_loss', test_stats['loss'], epoch)
-
-
 
         # if args.output_dir and misc.is_main_process():
         #     if log_writer is not None:

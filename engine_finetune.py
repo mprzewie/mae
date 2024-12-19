@@ -31,11 +31,13 @@ from models_vit import VisionTransformer
 from models_vits_dinov2 import DinoVisionTransformer
 
 
-def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
-                    data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
-                    mixup_fn: Optional[Mixup] = None, log_writer=None,
-                    args=None):
+def train_one_epoch(
+        model: torch.nn.Module, criterion: torch.nn.Module,
+        data_loader: Iterable, optimizer: torch.optim.Optimizer,
+        device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
+        mixup_fn: Optional[Mixup] = None, log_writer=None,
+        args=None, evaluate_accuracy: bool = True
+):
     model.train(True)
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -72,8 +74,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 outputs = model(samples)
 
             loss = criterion(outputs, targets)
-            acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
-            metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
+
+            if evaluate_accuracy:
+                acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
+                metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
 
         loss_value = loss.item()
 
