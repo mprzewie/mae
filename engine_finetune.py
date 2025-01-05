@@ -180,11 +180,17 @@ def evaluate(
 
 
 @torch.no_grad()
-def calculate_effrank(data_loader, model: MaskedAutoencoderViT, device):
+def calculate_effrank(data_loader, model: Union[MaskedAutoencoderViT, VisionTransformer], device):
     Xs = []
     for val_img, _ in data_loader:
         val_img = val_img.to(device)
-        latent, mask, ids_restore, (x_blocks, attn) = model.forward_encoder(val_img, mask_ratio=0)
+        if isinstance(model, MaskedAutoencoderViT):
+            latent, mask, ids_restore, (x_blocks, attn) = model.forward_encoder(val_img, mask_ratio=0)
+        elif isinstance(model, VisionTransformer):
+            latent, _, _ = model.forward_features(val_img, return_features="raw")
+        else:
+            assert False, type(model)
+
         cls_features = latent[:, 0]
         Xs.append(cls_features.detach().cpu().numpy())
 
