@@ -120,6 +120,8 @@ def get_args_parser():
 
     # new
     parser.add_argument('--discriminator_depth', type=int, default=8)
+    parser.add_argument("--mixing_rate", type=float, default=0.5)
+    parser.add_argument("--mixing_strategy", type=str, default="seq", choices=["seq"])
     # parser.add_argument('--lamb', type=float, default=0)
     # parser.add_argument('--umae_reg', type=str, default='none', choices=['none', 'spectral'])
     # parser.add_argument("--lpred_loss", type=str, default="mse", choices=["mse", "cos", "dino"])
@@ -254,6 +256,9 @@ def main(args):
     model: LatentMixer = LatentMixer(
         encoder=encoder,
         discriminator=discriminator,
+        mixing_rate=args.mixing_rate,
+        mixing_strategy=args.mixing_strategy,
+
     )
     # model: models_mae.MaskedAutoencoderViT = models_mae.__dict__[args.model](
     #     decoder_depth=args.decoder_depth,
