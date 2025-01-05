@@ -307,15 +307,15 @@ def main(args):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
 
-        # train_stats = train_lm_one_epoch(
-        #     model, data_loader_train,
-        #     optimizer, device, epoch, loss_scaler,
-        #     log_writer=log_writer,
-        #     args=args
-        # )
+        train_stats = train_lm_one_epoch(
+            model, data_loader_train,
+            optimizer, device, epoch, loss_scaler,
+            log_writer=log_writer,
+            args=args
+        )
 
         if epoch % args.val_interval == 0:
-            test_stats = evaluate(data_loader_val, model.encoder, device)
+            test_stats = evaluate(data_loader_val, model_without_ddp.encoder, device)
             effrank = calculate_effrank(data_loader_val, model_without_ddp.encoder, device)
 
             print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
