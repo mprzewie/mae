@@ -35,6 +35,7 @@ CLS_FT_CHOICES = [
         "tcut-eigbip", "tcut-eigbip-f",
         "tcut-eigsft", "tcut-eigsft-f",
         "abmilp", "attentive",
+        "maxpool", "top10pool"
     ]
 
 HUB_KEY_TO_URL = {
@@ -334,6 +335,19 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
             ret = x_cls
         elif return_features == "pos":
             ret = x_pos
+
+        elif return_features == "maxpool":
+            assert shuffle_subsets == 1, shuffle_subsets
+            patch_tokens = x_n_s_cl_d[:, 0, 1:]
+
+            ret = patch_tokens.max(axis=1).values
+
+        elif return_features == "top10pool":
+            assert shuffle_subsets == 1, shuffle_subsets
+            patch_tokens = x_n_s_cl_d[:, 0, 1:]
+
+            top_values = patch_tokens.sort(axis=1).values[:, :10]
+            ret = top_values.mean(axis=1)
 
         elif return_features == "raw":
             assert shuffle_subsets == 1
