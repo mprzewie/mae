@@ -353,6 +353,16 @@ class VisionTransformerSimMIM(nn.Module):
             ret = x_pos
         elif return_features == "raw":
             ret = to_return
+
+        elif return_features == "maxpool":
+            patch_tokens =  to_return[:, 1:]
+            ret = patch_tokens.max(axis=1).values
+
+        elif return_features == "top10pool":
+            patch_tokens =  to_return[:, 1:]
+            top_values = patch_tokens.sort(axis=1).values[:, :10]
+            ret = top_values.mean(axis=1)
+
         elif return_features == "both":
             ret = torch.concat([x_cls, x_pos], dim=2)
         else:
