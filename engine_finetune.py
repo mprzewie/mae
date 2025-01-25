@@ -164,7 +164,7 @@ def evaluate(
         batch_size = images.shape[0]
         metric_logger.update(loss=loss.item())
 
-        if len(targets.shape) == 1:
+        if len(target.shape) == 1:
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             pred = output.argmax(dim=1).detach().cpu()
             targets.append(target.cpu())
@@ -172,7 +172,7 @@ def evaluate(
             metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
             metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
         else:
-            prec, rec, f1 = bin_cls_metrics(output, targets)
+            prec, rec, f1 = bin_cls_metrics(output, target)
             metric_logger.meters["prec"].update(prec, n=batch_size)
             metric_logger.meters["rec"].update(rec, n=batch_size)
             metric_logger.meters['f1'].update(f1, n=batch_size)
