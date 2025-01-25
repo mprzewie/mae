@@ -127,9 +127,10 @@ def evaluate(
         model: Union[MaskedAutoencoderViT, VisionTransformer],
         device, *,
         return_targets_and_preds: bool = False, cls_features: str = "cls",
-        return_block: Optional[int] = None
+        return_block: Optional[int] = None,
+        criterion= torch.nn.CrossEntropyLoss()
 ):
-    criterion = torch.nn.CrossEntropyLoss()
+    # criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = misc.MetricLogger(delimiter="  ")
     header = 'Test:'
