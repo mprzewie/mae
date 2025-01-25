@@ -14,6 +14,7 @@ import sys
 from typing import Iterable, Optional, Union
 
 import numpy as np
+import sklearn
 import torch
 from einops import rearrange
 
@@ -72,8 +73,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 outputs = model(samples)
 
             loss = criterion(outputs, targets)
-            acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
-            metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
+
+            if len(targets.shape) == 1:
+                acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
+                metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
+            else:
+                prec, rec, f1 = bin_cls_metrics(outputs, targets)
+                metric_logger.update(prec=prec, rec=rec, f1=f1)
 
         loss_value = loss.item()
 
@@ -154,20 +160,28 @@ def evaluate(
 
             loss = criterion(output, target)
 
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        pred = output.argmax(dim=1).detach().cpu()
-        targets.append(target.cpu())
-        preds.append(pred.cpu())
-
         batch_size = images.shape[0]
         metric_logger.update(loss=loss.item())
-        metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-        metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+
+        if len(targets.shape) == 1:
+            acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            pred = output.argmax(dim=1).detach().cpu()
+            targets.append(target.cpu())
+            preds.append(pred.cpu())
+            metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
+            metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+        else:
+            prec, rec, f1 = bin_cls_metrics(output, targets)
+            metric_logger.meters["prec"].update(prec, n=batch_size)
+            metric_logger.meters["rec"].update(rec, n=batch_size)
+            metric_logger.meters['f1'].update(f1, n=batch_size)
+
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
-          .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
+    print("Averaged stats:", metric_logger)
+    # print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
+    #       .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
@@ -228,3 +242,16 @@ def draw_mae_predictions(dataset, model: MaskedAutoencoderViT, device):
     img = torch.cat([val_img, masked_img, pred_img, latent_pred_img], dim=0)
     img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=4)
     return img
+
+@torch.no_grad()
+def bin_cls_metrics(inputs, targets):
+    pred = (inputs[:, :40] > 0).long().cpu().numpy()
+    targets = targets.cpu().numpy()
+
+
+    prec= sklearn.metrics.precision_score(targets, pred, average="samples")
+    rec = sklearn.metrics.recall_score(targets, pred, average="samples")
+    f1 = sklearn.metrics.f1_score(targets, pred, average="samples")
+
+    return prec, rec, f1
+

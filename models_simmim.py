@@ -436,13 +436,14 @@ def build_vit(config):
 
 
 def vit_base_pretrained(
-        checkpoint_path="simmim_pretrain__vit_base__img224__800ep.pth"
+        checkpoint_path="simmim_pretrain__vit_base__img224__800ep.pth",
+        num_classes: int = 1000,
 ):
     kwargs = {
         'img_size': 224,
         'patch_size': 16,
         'in_chans': 3,
-        'num_classes': 1000,
+        'num_classes': num_classes,
         'embed_dim': 768,
         'depth': 12,
         'num_heads': 12,

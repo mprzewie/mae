@@ -188,13 +188,15 @@ def main(args):
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
-
-    if "stl10" not in str(args.data_path):
-        dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
-        dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
-    else:
+    if "stl10" in str(args.data_path):
         dataset_train = STL10(args.data_path, split="train", transform=transform_train, download=True)
         dataset_val = STL10(args.data_path, split='test', transform=transform_val, download=True)
+    elif "celeba" in  str(args.data_path):
+        dataset_train = datasets.CelebA(root=args.data_path, split="train", transform=transform_train, download=False)
+        dataset_val = datasets.CelebA(root=args.data_path, split="test", transform=transform_val, download=False)
+    else:
+        dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
+        dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
 
     print(dataset_train)
     print(dataset_val)
@@ -255,7 +257,8 @@ def main(args):
     )
     if args.simmim:
         model = models_simmim.__dict__[args.model](
-            checkpoint_path=args.finetune
+            checkpoint_path=args.finetune,
+            num_classes=args.nb_classes,
         )
     elif args.dinov2:
         dv2_arch, dv2_patch = args.model.split("_patch")
@@ -401,9 +404,10 @@ def main(args):
     print(optimizer)
     loss_scaler = NativeScaler()
 
-    criterion = torch.nn.CrossEntropyLoss()
-
-    print("criterion = %s" % str(criterion))
+    if "celeba" in str(args.data_path):
+        criterion = lambda outputs, targets: torch.nn.functional.binary_cross_entropy_with_logits(outputs[:, :40], targets.float())
+    else:
+        criterion = nn.CrossEntropyLoss()
 
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
