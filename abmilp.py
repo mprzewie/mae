@@ -22,6 +22,7 @@ class ABMILPHead(nn.Module):
             content: str = "all",
             num_patches: Optional[int] = None,
             num_heads: Optional[int] = 8,
+            attention_branches: int = 1,
         ):
         super().__init__()
 
@@ -38,7 +39,7 @@ class ABMILPHead(nn.Module):
         self.self_attn = Attention(dim, num_heads=num_heads) if self.self_attention_apply_to != "none" else nn.Identity()
 
 
-        self.ATTENTION_BRANCHES = 1
+        # self.ATTENTION_BRANCHES = 1
 
         attn_pred_layers = []
         for i in range(depth-1):
@@ -47,7 +48,7 @@ class ABMILPHead(nn.Module):
                 (nn.Tanh() if activation == "tanh" else nn.ReLU()),
             ])
 
-        attn_pred_layers.append(nn.Linear(dim, self.ATTENTION_BRANCHES))
+        attn_pred_layers.append(nn.Linear(dim, attention_branches))
         self.attention_predictor = nn.Sequential(*attn_pred_layers)
 
     def forward_with_attn_map(self, x):
@@ -67,8 +68,16 @@ class ABMILPHead(nn.Module):
         attn_map = F.softmax(attn_map, dim=1)
 
         x_out = x_attn if self.self_attention_apply_to in ["both"] else x
-        out = (x_out * attn_map).sum(dim=1)
-        return out, attn_map
+        # out = (x_out * attn_map).sum(dim=1)
+
+        x_perm = x_out.permute(0, 2, 1)
+
+        x_attn = (x_perm @ attn_map)
+
+        if x_attn.shape[2] == 1:
+            x_attn = x_attn.squeeze(2)
+
+        return x_attn, attn_map
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out, _ = self.forward_with_attn_map(x)
@@ -76,3 +85,16 @@ class ABMILPHead(nn.Module):
 
 
 
+
+class AbMILPCelebAHead(nn.Module):
+    def __init__(self, in_features: int, n_tasks: int) -> None:
+        super().__init__()
+        # solves each binary classification task separately
+        self.W = nn.Parameter(torch.randn(n_tasks, in_features, 1))
+        self.b = nn.Parameter(torch.randn(n_tasks))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        xW = (x.permute(2, 0, 1) @ self.W)
+        xW = xW.squeeze().T
+        x_out = xW + self.b
+        return x_out

@@ -37,7 +37,7 @@ import models_vits_dinov2
 # from timm.models.layers import trunc_normal_
 
 import util.misc as misc
-from abmilp import ABMILPHead
+from abmilp import ABMILPHead, AbMILPCelebAHead
 from attentive import AttentiveHead
 from engine_pretrain import AMP_PRECISIONS
 from models_vit import CLS_FT_CHOICES
@@ -349,13 +349,15 @@ def main(args):
                 content=args.abmilp_content,
                 num_patches=model.patch_embed.num_patches,
                 num_heads=args.attentive_heads,
+                attention_branches=40 if "celeba" in str(args.data_path) else 1
             )
         model.head = torch.nn.Sequential(
             abmilp,
             torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-            model.head
+            (model.head if "celeba" not in str(args.data_path) else AbMILPCelebAHead(model.head.in_features, 40))
         )
     elif args.cls_features.startswith("attentive"):
+
         attentive = AttentiveHead(
             embed_dim=model.head.in_features,
             num_heads=args.attentive_heads,
