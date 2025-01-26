@@ -147,7 +147,7 @@ def evaluate(
         target = target.to(device, non_blocking=True)
 
         # compute output
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast("cuda"):
             model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
             if isinstance(model_wo_ddp, MaskedAutoencoderViT):
                 assert return_block is None, f"{return_block=} not used"
