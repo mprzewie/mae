@@ -15,6 +15,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
+from models_vit import _timm_oracle
+
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -237,7 +239,7 @@ class VisionTransformerSimMIM(nn.Module):
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, init_values=None,
                  use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False,
-                 use_mean_pooling=True, init_scale=0.001):
+                 use_mean_pooling=True, init_scale=0.001, oracle:bool=True):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim
@@ -283,6 +285,9 @@ class VisionTransformerSimMIM(nn.Module):
         if num_classes > 0:
             self.head.weight.data.mul_(init_scale)
             self.head.bias.data.mul_(init_scale)
+
+        self.oracle = _timm_oracle() if oracle else None
+
 
     def _trunc_normal_(self, tensor, mean=0., std=1.):
         trunc_normal_(tensor, mean=mean, std=std)
