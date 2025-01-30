@@ -9,6 +9,7 @@
 import math
 from functools import partial
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -322,6 +323,8 @@ class VisionTransformerSimMIM(nn.Module):
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x, return_features: str = "cls", shuffle_subsets=None, return_block=12):
+        orig_x = x
+
         x = self.patch_embed(x)
         batch_size, seq_len, _ = x.size()
 
@@ -363,6 +366,62 @@ class VisionTransformerSimMIM(nn.Module):
             top_values = patch_tokens.sort(axis=1).values[:, :10]
             ret = top_values.mean(axis=1)
 
+        elif return_features.startswith("cp"):
+            cp = int(return_features.split("cp")[1])
+            # B, SS, T1, D = x_n_s_cl_d.shape
+            # x_n_cl_d = x_n_s_cl_d[:, 0]
+            B, T1, D = to_return.shape
+            fm = to_return[:, 1:]
+            T = fm.shape[1]
+            hw = np.sqrt(T)
+            assert int(hw) == hw, hw
+            hw = int(hw)
+            c = hw // 2
+            s = c - math.ceil(cp/2)
+            e = c + math.floor(cp/2)
+            fm = fm.reshape(B, hw, hw, D)
+            fm = fm[:, s:e, s:e]
+            fm = fm.mean(dim=[1,2])
+            ret = fm
+
+        elif return_features.startswith("attn"):
+            B, T1, D = to_return.shape
+            fm = to_return[:, 1:]
+
+            _, kind = return_features.split("attn-")
+            all_pos_attn_entropy = attentions[-1][4].squeeze()
+            cls_pos_attn_entropy = all_pos_attn_entropy[:, :, 0]
+            if kind == "lcte": # lowest class token entropy
+                min_entropy_map_ind = cls_pos_attn_entropy.argmin(dim=1)
+                min_entropy_map = attn[torch.arange(len(attn)), min_entropy_map_ind, 0, 1:].unsqueeze(2)
+                min_entropy_map = min_entropy_map / min_entropy_map.sum(dim=1, keepdim=True)
+
+                ret = (min_entropy_map * fm).sum(dim=1)
+
+            elif kind == "mn": # mean class token
+                mean_map = attn[:, :, 0, 1:].mean(dim=1).unsqueeze(2)
+                mean_map = mean_map / mean_map.sum(dim=1, keepdim=True)
+                ret = (mean_map * fm).sum(dim=1)
+
+
+
+            else:
+                raise NotImplementedError(return_features)
+
+        elif return_features == "dino":
+            B, T1, D = to_return.shape
+            fm = to_return[:, 1:]
+
+            with torch.no_grad():
+                _, _, _, (d_attn, _) = self.oracle.forward_features(orig_x, return_final_attn=True)
+
+            d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
+            fm = fm.unsqueeze(1)
+
+            fm_mul = fm * d_attn
+
+            ret = fm_mul.mean(dim=[1, 2])
+
         elif return_features == "both":
             ret = torch.concat([x_cls, x_pos], dim=2)
         else:
@@ -372,6 +431,8 @@ class VisionTransformerSimMIM(nn.Module):
         magnitudes = torch.cat(magnitudes, dim=2) # kind, batch, blocks, tokens
 
         return ret, attentions, magnitudes
+
+
 
     def forward(self, x: torch.Tensor, return_features: str = "cls", return_block=12) -> torch.Tensor:
         if return_features.startswith("abmilp") or return_features.startswith("attentive"):
