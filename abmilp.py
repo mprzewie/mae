@@ -52,7 +52,6 @@ class ABMILPHead(nn.Module):
         self.attention_predictor = nn.Sequential(*attn_pred_layers)
 
     def forward_with_attn_map(self, x):
-        # assert False, x.shape
         if self.content == "patch":
             x = x[:, 1:] # keep patch tokens only
 

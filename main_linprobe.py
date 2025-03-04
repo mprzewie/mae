@@ -141,6 +141,8 @@ def get_args_parser():
 
     parser.add_argument("--dinov2", action='store_true', default=False)
     parser.add_argument("--simmim", action="store_true", default=False)
+    parser.add_argument("--capi", action="store_true", default=False)
+
 
     parser.add_argument("--abmilp_act", choices=["tanh", "relu"], default="tanh",
                         help="abmilp activation function"
@@ -271,6 +273,11 @@ def main(args):
         )
         model.head = nn.Linear(model.embed_dim, args.nb_classes)
 
+    elif args.capi:
+        import models_capi
+        model = models_capi.__dict__[args.model]()
+        model.head = nn.Linear(model.embed_dim, args.nb_classes)
+
     else:
         cls_kwargs = dict()
         if "huge" in args.model:
@@ -293,20 +300,16 @@ def main(args):
                 else torch.load(args.finetune, map_location='cpu')
             )
 
-        else:
+        elif args.finetune.startswith("timm/"):
             print("Interpreting", args.finetune, "as timm model")
-            from timm.models.vision_transformer import _create_vision_transformer
-
-            # model_to_kwargs = {
-            #     "vit_tiny_patch16": dict(patch_size=16, embed_dim=192, depth=12, num_heads=12),
-            #     "vit_small_patch16": dict(patch_size=16, embed_dim=384, depth=12, num_heads=12),
-            #     "vit_base_patch16": dict(patch_size=16, embed_dim=768, depth=12, num_heads=12),
-            #     "vit_large_patch16": dict(patch_size=16, embed_dim=1024, depth=24, num_heads=16),
-            #     "vit_huge_patch14": dict(patch_size=14, embed_dim=1280, depth=32, num_heads=16),
-            # }
-            # model_kwargs = model_to_kwargs[args.model]
-            # checkpoint_model = _create_vision_transformer(args.finetune, pretrained=True, **model_kwargs).state_dict()
-            checkpoint_model = load_state_dict_from_hf(f'timm/{args.finetune}')
+            checkpoint_model = load_state_dict_from_hf(args.finetune)
+        else:
+            print("Interpreting", args.finetune, "as hub model")
+            owner, repo, model_name = args.finetune.split("/")
+            checkpoint_model = torch.hub.load(f"{owner}/{repo}", model_name, trust_repo=True).state_dict()
+            # for k, v in checkpoint_model.items():
+            #     print(k, "\t", v.shape, "\t", v.dtype)
+            # assert False
 
         state_dict = model.state_dict()
         for k in ['head.weight', 'head.bias']:
@@ -324,10 +327,6 @@ def main(args):
         # load pre-trained model
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
-
-        # if args.global_pool:
-        #     assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        # else:
 
         assert all([
             k.startswith("head") or k.startswith("oracle") or k.startswith("fc") or k.startswith("mask")

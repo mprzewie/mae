@@ -26,6 +26,7 @@ from tqdm import tqdm
 import util.misc as misc
 import util.lr_sched as lr_sched
 from engine_pretrain import AMP_PRECISIONS
+from models_capi import CAPIEncoderDecoder
 from models_mae import MaskedAutoencoderViT
 from models_simmim import VisionTransformerSimMIM
 from models_vit import VisionTransformer
@@ -50,14 +51,16 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
 
+    dtype = AMP_PRECISIONS[args.amp]
+
     for data_iter_step, (samples, targets) in tqdm(enumerate(metric_logger.log_every(data_loader, print_freq, header))):
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
-        samples = samples.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
+        samples = samples.to(device=device, dtype=dtype, non_blocking=True)
+        targets = targets.to(device=device, non_blocking=True)
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
@@ -65,10 +68,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         with torch.amp.autocast(
                 device_type='cuda',
                 enabled=args.amp != "none",
-                dtype=AMP_PRECISIONS[args.amp]
+                dtype=dtype
         ):
             model_wo_ddp = model if not isinstance(model, DistributedDataParallel) else model.module
-            if isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM, DinoVisionTransformer)):
+            if isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM, DinoVisionTransformer, CAPIEncoderDecoder)):
                 outputs = model(samples, return_features=args.cls_features, return_block=args.return_block)
             else:
                 outputs = model(samples)
@@ -153,7 +156,7 @@ def evaluate(
             if isinstance(model_wo_ddp, MaskedAutoencoderViT):
                 assert return_block is None, f"{return_block=} not used"
                 _, _, _, (_, output, _, _, _) = model.forward(images, cls_features)
-            elif isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM, DinoVisionTransformer)):
+            elif isinstance(model_wo_ddp, (VisionTransformer, VisionTransformerSimMIM, DinoVisionTransformer, CAPIEncoderDecoder)):
                 output = model.forward(images, return_features=cls_features, return_block=return_block)
             else:
                 assert return_block is None, f"{return_block=} not used"
