@@ -24,6 +24,7 @@ from timm.models.vision_transformer import vit_base_patch14_dinov2
 from torch import nn
 from torch.hub import load_state_dict_from_url
 from torch.optim import SGD
+from torch.optim.adamw import AdamW
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -66,7 +67,7 @@ def get_args_parser():
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0,
                         help='weight decay (default: 0 for linear probe following MoCo v1)')
-    parser.add_argument('--optimizer', type=str, default="lars", choices=['lars', 'sgd'])
+    parser.add_argument('--optimizer', type=str, default="lars", choices=['lars', 'sgd', 'adamw'])
 
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
@@ -400,8 +401,10 @@ def main(args):
 
     if args.optimizer == "lars":
         optimizer = LARS(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    else:
+    elif args.optimizer == "sgd":
         optimizer = SGD(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    elif args.optimizer == "adamw":
+        optimizer = AdamW(model_without_ddp.head.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     print(optimizer)
     loss_scaler = NativeScaler()
