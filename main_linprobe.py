@@ -27,12 +27,13 @@ from torch import nn
 from torch.hub import load_state_dict_from_url
 from torch.optim import SGD
 from torch.optim.adamw import AdamW
+from torch.utils.data import random_split
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import timm
-from torchvision.datasets import STL10
+from torchvision.datasets import STL10, OxfordIIITPet, Flowers102, StanfordCars, FGVCAircraft
 
 import models_simmim
 import models_vits_dinov2
@@ -200,6 +201,22 @@ def main(args):
     elif "celeba" in  str(args.data_path):
         dataset_train = datasets.CelebA(root=args.data_path, split="train", transform=transform_train, download=False)
         dataset_val = datasets.CelebA(root=args.data_path, split="test", transform=transform_val, download=False)
+    elif "pets" in str(args.data_path):
+        generator = lambda seed: torch.Generator().manual_seed(seed)
+        trainval = OxfordIIITPet(root=args.data_path, split='trainval', transform=transform_train, download=True)
+        dataset_train, _ = random_split(trainval, [2940, 740], generator=generator(49))
+        dataset_val = OxfordIIITPet(root=args.data_path, split='test', transform=transform_val, download=True)
+    elif "flowers" in str(args.data_path):
+        dataset_train = Flowers102(args.data_path, split="train", transform=transform_train, download=True)
+        dataset_val = Flowers102(args.data_path, split="test", transform=transform_val, download=True)
+
+    elif "cars" in str(args.data_path):
+        dataset_train = StanfordCars(args.data_path, "train", transform=transform_train, download=True)
+        dataset_val = StanfordCars(args.data_path, "test", transform=transform_val, download=True)
+    elif "aircraft" in str(args.data_path):
+        dataset_train = FGVCAircraft(args.data_path, "train", transform=transform_train, download=True)
+        dataset_val = FGVCAircraft(args.data_path, "test", transform=transform_val, download=True)
+
     else:
         dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
         dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
