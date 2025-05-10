@@ -183,25 +183,29 @@ def evaluate(
                 assert return_block is None, f"{return_block=} not used"
                 output = model.forward(images)
 
+            outputs = output
+            batch_size=images.size(0)
 
-            loss = criterion(output, target)
+            for key, output in outputs.items():
+                loss = criterion(output, targets)
 
-        batch_size = images.shape[0]
-        metric_logger.update(loss=loss.item())
+                if len(target.shape) == 1:
+                    acc1, acc5 = accuracy(output, target, topk=(1, 5))
+                    metrics = {
+                        f"{key}/acc1": acc1.item(),
+                        f"{key}/acc5": acc5.item(),
+                    }
+                else:
+                    prec, rec, f1 = bin_cls_metrics(output, target)
+                    metrics = {
+                        f"{key}/prec": prec.item(),
+                        f"{key}/rec": rec.item(),
+                        f"{key}/f1": f1.item(),
+                    }
+                metrics[f"{key}/loss"] = loss.item()
 
-        if len(target.shape) == 1:
-            acc1, acc5 = accuracy(output, target, topk=(1, 5))
-            pred = output.argmax(dim=1).detach().cpu()
-            targets.append(target.cpu())
-            preds.append(pred.cpu())
-            metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-            metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
-        else:
-            prec, rec, f1 = bin_cls_metrics(output, target)
-            metric_logger.meters["prec"].update(prec, n=batch_size)
-            metric_logger.meters["rec"].update(rec, n=batch_size)
-            metric_logger.meters['f1'].update(f1, n=batch_size)
-
+                for k,v in metrics.items():
+                    metric_logger.meters[k].update(v.item(), n=batch_size)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
