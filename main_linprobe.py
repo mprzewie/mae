@@ -41,6 +41,7 @@ import util.misc as misc
 from abmilp import ABMILPHead, AbMILPCelebAHead
 from attentive import AttentiveHead
 from engine_pretrain import AMP_PRECISIONS
+from manyhead import AllClassifiers
 from models_vit import CLS_FT_CHOICES
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
@@ -89,7 +90,7 @@ def get_args_parser():
     #                     help='Use class token instead of global pool for classification')
     parser.add_argument("--cls_features",
                         choices=CLS_FT_CHOICES,
-                        default="cls", help="cls token / positional tokens for classification")
+                        default="cls", help="cls token / positional tokens for classification", nargs="*")
     parser.add_argument("--return_block", type=int, default=None)
     parser.add_argument("--checkpoint_key", default="model", type=str)
 
@@ -339,43 +340,50 @@ def main(args):
     # for linear prob only
     # hack: revise model's head with BN
 
-    if args.cls_features.startswith("abmilp"):
-        abmilp = ABMILPHead(
-                dim=model.head.in_features,
-                self_attention_apply_to=args.abmilp_sa,
-                activation=args.abmilp_act,
-                depth=args.abmilp_depth,
-                cond=args.abmilp_cond,
-                content=args.abmilp_content,
-                num_patches=model.patch_embed.num_patches,
-                num_heads=args.attentive_heads,
-                attention_branches=40 if "celeba" in str(args.data_path) else 1
+    heads = dict()
+    for cls_feat in args.cls_features:
+        if cls_feat.startswith("abmilp"):
+            abmilp = ABMILPHead(
+                    dim=model.head.in_features,
+                    self_attention_apply_to=args.abmilp_sa,
+                    activation=args.abmilp_act,
+                    depth=args.abmilp_depth,
+                    cond=args.abmilp_cond,
+                    content=args.abmilp_content,
+                    num_patches=model.patch_embed.num_patches,
+                    num_heads=args.attentive_heads,
+                    attention_branches=40 if "celeba" in str(args.data_path) else 1
+                )
+            head = torch.nn.Sequential(
+                abmilp,
+                torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+                (model.head if "celeba" not in str(args.data_path) else AbMILPCelebAHead(model.head.in_features, 40))
             )
-        model.head = torch.nn.Sequential(
-            abmilp,
-            torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-            (model.head if "celeba" not in str(args.data_path) else AbMILPCelebAHead(model.head.in_features, 40))
-        )
-    elif args.cls_features.startswith("attentive"):
+        elif cls_feat.startswith("attentive"):
 
-        attentive = AttentiveHead(
-            embed_dim=model.head.in_features,
-            num_heads=args.attentive_heads,
-        )
-        model.head = torch.nn.Sequential(
-            attentive,
-            torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-            model.head
-        )
-    else:
-        model.head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+            attentive = AttentiveHead(
+                embed_dim=model.head.in_features,
+                num_heads=args.attentive_heads,
+            )
+            head = torch.nn.Sequential(
+                attentive,
+                torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+                model.head
+            )
+        else:
+            head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+
+        heads[cls_feat] = head
+
+    model.head = AllClassifiers(heads)
+
     # freeze all but the head
     for _, p in model.named_parameters():
         p.requires_grad = False
     for _, p in model.head.named_parameters():
         p.requires_grad = True
 
-    model.to(device)
+    model = model.to(device)
 
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -455,24 +463,20 @@ def main(args):
             print(f'Max accuracy: {max_accuracy:.2f}%')
 
         if log_writer is not None:
-            for k, v in train_stats.items():
-                log_writer.add_scalar(f'test_v1_{args.cls_features}/train_{k}', v, epoch)
-            for k, v in test_stats.items():
-                log_writer.add_scalar(f'test_v1_{args.cls_features}/test_{k}', v, epoch)
+            for fold, stats in [
+                ("train", train_stats),
+                ("test", test_stats),
+            ]:
+                for k, v in stats.items():
+                    suffix = ""
+                    mtr = k
+                    if "/" in k:
+                        cft, mtr = k.split("/")
+                        suffix = f"_{cft}"
 
-            # log_writer.add_scalar(f'test_v1_{args.cls_features}/train_acc1', train_stats['acc1'], epoch)
-            # log_writer.add_scalar(f'test_v1_{args.cls_features}/train_loss', train_stats['loss'], epoch)
-            # log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc1', test_stats['acc1'], epoch)
-            # log_writer.add_scalar(f'test_v1_{args.cls_features}/test_acc5', test_stats['acc5'], epoch)
-            # log_writer.add_scalar(f'test_v1_{args.cls_features}/test_loss', test_stats['loss'], epoch)
+                    log_writer.add_scalar(f'test_v1{suffix}/{fold}_{mtr}', v, epoch)
 
 
-
-        # if args.output_dir and misc.is_main_process():
-        #     if log_writer is not None:
-        #         log_writer.flush()
-        #     with open(os.path.join(args.output_dir, "log.txt"), mode="a", encoding="utf-8") as f:
-        #         f.write(json.dumps(log_stats) + "\n")
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

@@ -76,16 +76,37 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             else:
                 outputs = model(samples)
 
-            loss = criterion(outputs, targets)
-
-            if len(targets.shape) == 1:
-                acc1, acc5 = accuracy(outputs, targets, topk=(1, 5))
-                metric_logger.update(acc1=acc1.item(), acc5=acc5.item())
+            if isinstance(args.cls_features, list):
+                assert set(args.cls_features) == outputs.keys()
             else:
-                prec, rec, f1 = bin_cls_metrics(outputs, targets)
-                metric_logger.update(prec=prec, rec=rec, f1=f1)
+                assert len(outputs) == 1
+                assert args.cls_features == list(outputs.keys())[0]
 
-        loss_value = loss.item()
+
+            loss_total = 0
+            for key, output in outputs.items():
+                loss = criterion(output, targets)
+
+                if len(targets.shape) == 1:
+                    acc1, acc5 = accuracy(output, targets, topk=(1, 5))
+                    metrics = {
+                        f"{key}/acc1": acc1.item(),
+                        f"{key}/acc5": acc5.item(),
+                    }
+                else:
+                    prec, rec, f1 = bin_cls_metrics(output, targets)
+                    metrics = {
+                        f"{key}/prec": prec.item(),
+                        f"{key}/rec": rec.item(),
+                        f"{key}/f1": f1.item(),
+                    }
+                metrics[f"{key}/loss"] = loss.item()
+                metric_logger.update(**metrics)
+
+                loss_total = loss_total + loss
+
+
+        loss_value = loss_total.item()
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -101,7 +122,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if torch.cuda.is_available():
             torch.cuda.synchronize()
 
-        metric_logger.update(loss=loss_value)
+        metric_logger.update(loss_total=loss_value)
         min_lr = 10.
         max_lr = 0.
         for group in optimizer.param_groups:

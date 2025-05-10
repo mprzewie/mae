@@ -10,7 +10,7 @@ import math
 # --------------------------------------------------------
 
 from functools import partial
-from typing import Optional, Final, Type, Literal
+from typing import Optional, Final, Type, Literal, List
 
 import numpy as np
 import torch
@@ -330,217 +330,224 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
         # average back the shuffled subsets
         x_cls = x_cls.mean(dim=1)
         x_pos = x_pos.mean(dim=1)
+        if not isinstance(return_features, list):
+            assert isinstance(return_features, str), f"{return_features=} must be a list or str"
+            return_features = [return_features]
 
-        if return_features == "cls":
-            ret = x_cls
-        elif return_features == "pos":
-            ret = x_pos
+        rets = dict()
+        for retf in return_features:
+            if retf == "cls":
+                ret = x_cls
+            elif retf == "pos":
+                ret = x_pos
 
-        elif return_features == "maxpool":
-            assert shuffle_subsets == 1, shuffle_subsets
-            patch_tokens = x_n_s_cl_d[:, 0, 1:]
+            elif retf == "maxpool":
+                assert shuffle_subsets == 1, shuffle_subsets
+                patch_tokens = x_n_s_cl_d[:, 0, 1:]
 
-            ret = patch_tokens.max(axis=1).values
+                ret = patch_tokens.max(axis=1).values
 
-        elif return_features == "top10pool":
-            assert shuffle_subsets == 1, shuffle_subsets
-            patch_tokens = x_n_s_cl_d[:, 0, 1:]
+            elif retf == "top10pool":
+                assert shuffle_subsets == 1, shuffle_subsets
+                patch_tokens = x_n_s_cl_d[:, 0, 1:]
 
-            top_values = patch_tokens.sort(axis=1).values[:, :10]
-            ret = top_values.mean(axis=1)
+                top_values = patch_tokens.sort(axis=1).values[:, :10]
+                ret = top_values.mean(axis=1)
 
-        elif return_features == "raw":
-            assert shuffle_subsets == 1
-            ret = x_n_s_cl_d[:, 0]
+            elif  retf.startswith("abmilp") or retf.startswith("attentive"):
+                assert shuffle_subsets == 1
+                ret = x_n_s_cl_d[:, 0]
 
-        elif return_features == "both":
-            ret = torch.concat([x_cls, x_pos], dim=2)
-        elif return_features.startswith("cp"):
-            assert shuffle_subsets==1
-            cp = int(return_features.split("cp")[1])
-            B, SS, T1, D = x_n_s_cl_d.shape
-            x_n_cl_d = x_n_s_cl_d[:, 0]
-            fm = x_n_cl_d[:, 1:]
-            T = fm.shape[1]
-            hw = np.sqrt(T)
-            assert int(hw) == hw, hw
-            hw = int(hw)
-            c = hw // 2
-            s = c - math.ceil(cp/2)
-            e = c + math.floor(cp/2)
-            fm = fm.reshape(B, hw, hw, D)
-            fm = fm[:, s:e, s:e]
-            fm = fm.mean(dim=[1,2])
-            ret = fm
+            elif retf == "both":
+                ret = torch.concat([x_cls, x_pos], dim=2)
+            elif retf.startswith("cp"):
+                assert shuffle_subsets==1
+                cp = int(return_features.split("cp")[1])
+                B, SS, T1, D = x_n_s_cl_d.shape
+                x_n_cl_d = x_n_s_cl_d[:, 0]
+                fm = x_n_cl_d[:, 1:]
+                T = fm.shape[1]
+                hw = np.sqrt(T)
+                assert int(hw) == hw, hw
+                hw = int(hw)
+                c = hw // 2
+                s = c - math.ceil(cp/2)
+                e = c + math.floor(cp/2)
+                fm = fm.reshape(B, hw, hw, D)
+                fm = fm[:, s:e, s:e]
+                fm = fm.mean(dim=[1,2])
+                ret = fm
 
-        elif return_features.startswith("ca"):
-            assert shuffle_subsets==1
-            ca = int(return_features.split("ca")[1])
-            B, SS, T1, D = x_n_s_cl_d.shape
-            x_n_cl_d = x_n_s_cl_d[:, 0]
-            fm = x_n_cl_d[:, 1:]
-            T = fm.shape[1]
-            hw = np.sqrt(T)
-            assert int(hw) == hw, hw
-            hw = int(hw)
-            c = hw // 2
-            s = c - math.ceil(ca/2)
-            e = c + math.floor(ca/2)
-            # fm = fm.reshape(B, hw, hw, D)
-            attn = attn.mean(dim=1)[:, 1:, 1:].reshape(B, hw, hw, hw**2)
-            attn_ss = attn[:, s:e, s:e].mean(dim=[1,2])
-            attn_ss_denom = attn_ss.sum(dim=1, keepdim=True)
-            attn_ss = attn_ss / (attn_ss_denom + 1e-6)
+            elif retf.startswith("ca"):
+                assert shuffle_subsets==1
+                ca = int(return_features.split("ca")[1])
+                B, SS, T1, D = x_n_s_cl_d.shape
+                x_n_cl_d = x_n_s_cl_d[:, 0]
+                fm = x_n_cl_d[:, 1:]
+                T = fm.shape[1]
+                hw = np.sqrt(T)
+                assert int(hw) == hw, hw
+                hw = int(hw)
+                c = hw // 2
+                s = c - math.ceil(ca/2)
+                e = c + math.floor(ca/2)
+                # fm = fm.reshape(B, hw, hw, D)
+                attn = attn.mean(dim=1)[:, 1:, 1:].reshape(B, hw, hw, hw**2)
+                attn_ss = attn[:, s:e, s:e].mean(dim=[1,2])
+                attn_ss_denom = attn_ss.sum(dim=1, keepdim=True)
+                attn_ss = attn_ss / (attn_ss_denom + 1e-6)
 
-            ret = (fm * attn_ss.unsqueeze(2)).mean(dim=1)
+                ret = (fm * attn_ss.unsqueeze(2)).mean(dim=1)
 
-        elif return_features == "dino":
-            assert shuffle_subsets == 1
-            x_n_cl_d = x_n_s_cl_d[:, 0]
-            fm = x_n_cl_d[:, 1:]
+            elif retf == "dino":
+                assert shuffle_subsets == 1
+                x_n_cl_d = x_n_s_cl_d[:, 0]
+                fm = x_n_cl_d[:, 1:]
 
-            with torch.no_grad():
-                _, _, _, (d_attn, _) = self.oracle.forward_features(orig_x, return_final_attn=True)
+                with torch.no_grad():
+                    _, _, _, (d_attn, _) = self.oracle.forward_features(orig_x, return_final_attn=True)
 
-            d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
-            fm = fm.unsqueeze(1)
+                d_attn = d_attn[:, :, 0, 1:].unsqueeze(3)
+                fm = fm.unsqueeze(1)
 
-            fm_mul = fm * d_attn
+                fm_mul = fm * d_attn
 
-            ret = fm_mul.mean(dim=[1,2])
+                ret = fm_mul.mean(dim=[1,2])
 
-        elif return_features.startswith("attn"):
-            assert shuffle_subsets == 1
-            x_n_cl_d = x_n_s_cl_d[:, 0]
-            fm = x_n_cl_d[:, 1:]
+            elif retf.startswith("attn"):
+                assert shuffle_subsets == 1
+                x_n_cl_d = x_n_s_cl_d[:, 0]
+                fm = x_n_cl_d[:, 1:]
 
-            _, kind = return_features.split("attn-")
-            # assert False, all_pos_attn_entropy.shape
-            cls_pos_attn_entropy = all_pos_attn_entropy[:, :, 0]
-            if kind == "lcte": # lowest class token entropy
-                min_entropy_map_ind = cls_pos_attn_entropy.argmin(dim=1)
-                min_entropy_map = attn[torch.arange(len(attn)), min_entropy_map_ind, 0, 1:].unsqueeze(2)
-                min_entropy_map = min_entropy_map / min_entropy_map.sum(dim=1, keepdim=True)
+                _, kind = return_features.split("attn-")
+                # assert False, all_pos_attn_entropy.shape
+                cls_pos_attn_entropy = all_pos_attn_entropy[:, :, 0]
+                if kind == "lcte": # lowest class token entropy
+                    min_entropy_map_ind = cls_pos_attn_entropy.argmin(dim=1)
+                    min_entropy_map = attn[torch.arange(len(attn)), min_entropy_map_ind, 0, 1:].unsqueeze(2)
+                    min_entropy_map = min_entropy_map / min_entropy_map.sum(dim=1, keepdim=True)
 
-                ret = (min_entropy_map * fm).sum(dim=1)
+                    ret = (min_entropy_map * fm).sum(dim=1)
 
-            elif kind == "mn": # mean class token
-                mean_map = attn[:, :, 0, 1:].mean(dim=1).unsqueeze(2)
-                mean_map = mean_map / mean_map.sum(dim=1, keepdim=True)
-                ret = (mean_map * fm).sum(dim=1)
+                elif kind == "mn": # mean class token
+                    mean_map = attn[:, :, 0, 1:].mean(dim=1).unsqueeze(2)
+                    mean_map = mean_map / mean_map.sum(dim=1, keepdim=True)
+                    ret = (mean_map * fm).sum(dim=1)
+
+                else:
+                    raise NotImplementedError(return_features)
+
+            elif retf.startswith("tcut"):
+                assert shuffle_subsets == 1
+                x_n_cl_d = x_n_s_cl_d[:, 0]
+                fm = x_n_cl_d[:, 1:]
+                bipartition, eigen  = batch_ncut(fm)
+
+
+                # assert False, (fm.shape, bipartition.shape)
+                fg_bp = bipartition.unsqueeze(2)
+                # foreground tokens std
+                fg_fm = fm * fg_bp
+                fg_nums = fg_bp.sum(dim=1, keepdim=True)
+                fg_sum = fg_fm.sum(dim=1, keepdim=True)
+                fg_mean = fg_sum / (fg_nums + 1e-6)
+                fg_sd = (fg_fm - fg_mean) ** 2
+                fg_var = (fg_sd * fg_bp).sum(dim=1, keepdim=True) / (fg_nums + 1e-6)
+                fg_std = fg_var.sqrt()
+                fg_std_m = fg_std.mean(dim=2)
+                # background tokens std
+                bg_bp = (1 - bipartition).unsqueeze(2)
+                bg_fm = fm * bg_bp
+                bg_nums = bg_bp.sum(dim=1, keepdim=True)
+                bg_sum = bg_fm.sum(dim=1, keepdim=True)
+                bg_mean = bg_sum / (bg_nums + 1e-6)
+                bg_sd = (bg_fm - bg_mean) ** 2
+                bg_var = (bg_sd * bg_bp).sum(dim=1, keepdim=True)  / (bg_nums + 1e-6)
+                bg_std = bg_var.sqrt()
+                bg_std_m = bg_std.mean(dim=2)
+
+                if return_features.endswith("-f"):
+                    flip = (bg_std_m > fg_std_m).squeeze()
+                    bipartition[flip] = 1 - bipartition[flip]
+                    eigen[flip] = -eigen[flip]
+
+                eigen = eigen - eigen.min(dim=1, keepdim=True)[0]
+
+                eigen_softmax = torch.nn.functional.softmax(eigen)
+
+                method = return_features.split("-")[1]
+                if method == "eigsft": # in return_features:
+                    mul = eigen_softmax
+                elif method =="eigbip": # in return_features:
+                    mul = bipartition * eigen
+                elif method =="eig": # in return_features:
+                    mul = eigen
+                elif method =="bip": # in return_features:
+                    mul = bipartition
+                else:
+                    raise NotImplementedError(return_features)
+
+                mul = mul / (mul.sum(dim=1, keepdim=True) + 1e-6)
+                mul = mul.unsqueeze(2)
+
+                fm_mul = fm * mul
+                ret = fm_mul.sum(dim=1)
+
+                # mul_fm = mul.reshape(len(orig_x),14,14)
+
+                # bipartition_fm = bipartition.reshape(len(orig_x),14,14)
+                # eigen_fm = eigen_softmax.reshape(len(orig_x),14,14)
+
+                # fg_t_std = masked_tensor(fm, fm==1).std(dim=1).mean(dim=1)
+                # bg_t_std = masked_tensor(fm, fm==0).std(dim=1).mean(dim=1)
+
+                # assert False, fg_t.shape
+
+
+                # fg_std = fm[barr, bipartition_fm==1, :].std(dim=1, keepdim=True)
+                # bg_std = fm[barr, bipartition_fm==0, :].std(dim=1, keepdim=True)
+
+                # assert False, [fg_std.shape, bg_std.shape]
+
+
+                # import matplotlib.pyplot as plt
+                # rows, cols = (len(orig_x), 3)
+                #
+                # fig, ax = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2.5))
+                # for b in range(rows):
+                #     ax[b, 0].imshow(orig_x[b].permute(1,2,0).cpu() + 0.5)
+                #     ax[b, 1].imshow(mul_fm[b].cpu())
+                #     ax[b, 2].imshow(mul_fm[b].cpu())
+                #     import seaborn as sns
+                #     sns.heatmap(mul_fm[b].cpu(), ax=ax[b, 2])
+                #     ax[b, 1].set_title(f"bp fgs {fg_std_m[b].item():.3}", fontsize="xx-small")
+                #     ax[b, 2].set_title(f"eig bgs {bg_std_m[b].item():.3}", fontsize="xx-small")
+                #
+                # plt.show()
+                # assert False
+
+
+                # assert False, (orig_x.shape, bipartition.shape, eigen.shape)
 
             else:
-                raise NotImplementedError(return_features)
+                raise NotImplementedError(retf)
 
-        elif return_features.startswith("tcut"):
-            assert shuffle_subsets == 1
-            x_n_cl_d = x_n_s_cl_d[:, 0]
-            fm = x_n_cl_d[:, 1:]
-            bipartition, eigen  = batch_ncut(fm)
-
-
-            # assert False, (fm.shape, bipartition.shape)
-            fg_bp = bipartition.unsqueeze(2)
-            # foreground tokens std
-            fg_fm = fm * fg_bp
-            fg_nums = fg_bp.sum(dim=1, keepdim=True)
-            fg_sum = fg_fm.sum(dim=1, keepdim=True)
-            fg_mean = fg_sum / (fg_nums + 1e-6)
-            fg_sd = (fg_fm - fg_mean) ** 2
-            fg_var = (fg_sd * fg_bp).sum(dim=1, keepdim=True) / (fg_nums + 1e-6)
-            fg_std = fg_var.sqrt()
-            fg_std_m = fg_std.mean(dim=2)
-            # background tokens std
-            bg_bp = (1 - bipartition).unsqueeze(2)
-            bg_fm = fm * bg_bp
-            bg_nums = bg_bp.sum(dim=1, keepdim=True)
-            bg_sum = bg_fm.sum(dim=1, keepdim=True)
-            bg_mean = bg_sum / (bg_nums + 1e-6)
-            bg_sd = (bg_fm - bg_mean) ** 2
-            bg_var = (bg_sd * bg_bp).sum(dim=1, keepdim=True)  / (bg_nums + 1e-6)
-            bg_std = bg_var.sqrt()
-            bg_std_m = bg_std.mean(dim=2)
-
-            if return_features.endswith("-f"):
-                flip = (bg_std_m > fg_std_m).squeeze()
-                bipartition[flip] = 1 - bipartition[flip]
-                eigen[flip] = -eigen[flip]
-
-            eigen = eigen - eigen.min(dim=1, keepdim=True)[0]
-
-            eigen_softmax = torch.nn.functional.softmax(eigen)
-
-            method = return_features.split("-")[1]
-            if method == "eigsft": # in return_features:
-                mul = eigen_softmax
-            elif method =="eigbip": # in return_features:
-                mul = bipartition * eigen
-            elif method =="eig": # in return_features:
-                mul = eigen
-            elif method =="bip": # in return_features:
-                mul = bipartition
-            else:
-                raise NotImplementedError(return_features)
-
-            mul = mul / (mul.sum(dim=1, keepdim=True) + 1e-6)
-            mul = mul.unsqueeze(2)
-
-            fm_mul = fm * mul
-            ret = fm_mul.sum(dim=1)
-
-            # mul_fm = mul.reshape(len(orig_x),14,14)
-
-            # bipartition_fm = bipartition.reshape(len(orig_x),14,14)
-            # eigen_fm = eigen_softmax.reshape(len(orig_x),14,14)
-
-            # fg_t_std = masked_tensor(fm, fm==1).std(dim=1).mean(dim=1)
-            # bg_t_std = masked_tensor(fm, fm==0).std(dim=1).mean(dim=1)
-
-            # assert False, fg_t.shape
-
-
-            # fg_std = fm[barr, bipartition_fm==1, :].std(dim=1, keepdim=True)
-            # bg_std = fm[barr, bipartition_fm==0, :].std(dim=1, keepdim=True)
-
-            # assert False, [fg_std.shape, bg_std.shape]
-
-
-            # import matplotlib.pyplot as plt
-            # rows, cols = (len(orig_x), 3)
-            #
-            # fig, ax = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2.5))
-            # for b in range(rows):
-            #     ax[b, 0].imshow(orig_x[b].permute(1,2,0).cpu() + 0.5)
-            #     ax[b, 1].imshow(mul_fm[b].cpu())
-            #     ax[b, 2].imshow(mul_fm[b].cpu())
-            #     import seaborn as sns
-            #     sns.heatmap(mul_fm[b].cpu(), ax=ax[b, 2])
-            #     ax[b, 1].set_title(f"bp fgs {fg_std_m[b].item():.3}", fontsize="xx-small")
-            #     ax[b, 2].set_title(f"eig bgs {bg_std_m[b].item():.3}", fontsize="xx-small")
-            #
-            # plt.show()
-            # assert False
-
-
-            # assert False, (orig_x.shape, bipartition.shape, eigen.shape)
-
-        else:
-            raise NotImplementedError(return_features)
-
+            rets[retf] = ret
         attentions = torch.cat(attentions, dim=2) if len(attentions) > 0 else None # kind, batch, blocks, heads, tokens
         magnitudes = torch.cat(magnitudes, dim=2) if len(magnitudes) > 0 else None # kind, batch, blocks, tokens
 
         if return_final_attn:
-            return ret, attentions, magnitudes, (attn, x_n_s_cl_d)
+            return rets, attentions, magnitudes, (attn, x_n_s_cl_d)
 
-        return ret, attentions, magnitudes
+        return rets, attentions, magnitudes
 
 
 
-    def forward(self, x: torch.Tensor, return_features: str = "cls", return_block: Optional[int] = None) -> torch.Tensor:
-        if return_features.startswith("abmilp") or return_features.startswith("attentive"):
-            return_features = "raw"
+    def forward(self, x: torch.Tensor, return_features: List[str] = None, return_block: Optional[int] = None) -> torch.Tensor:
+        # if return_features.startswith("abmilp") or return_features.startswith("attentive"):
+        #     return_features = "raw"
 
+        return_features = return_features or ["cls"]
         x, attn, magnitudes = self.forward_features(
             x, return_features=return_features, shuffle_subsets=1, return_block=return_block
         )
