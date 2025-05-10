@@ -187,7 +187,8 @@ def evaluate(
             batch_size=images.size(0)
 
             for key, output in outputs.items():
-                loss = criterion(output, targets)
+
+                loss = criterion(output, target)
 
                 if len(target.shape) == 1:
                     acc1, acc5 = accuracy(output, target, topk=(1, 5))
@@ -205,7 +206,7 @@ def evaluate(
                 metrics[f"{key}/loss"] = loss.item()
 
                 for k,v in metrics.items():
-                    metric_logger.meters[k].update(v.item(), n=batch_size)
+                    metric_logger.meters[k].update(v, n=batch_size)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
