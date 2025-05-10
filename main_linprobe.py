@@ -359,10 +359,13 @@ def main(args):
             head = torch.nn.Sequential(
                 abmilp,
                 torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-                (model.head if "celeba" not in str(args.data_path) else AbMILPCelebAHead(model.head.in_features, 40))
+                (
+                    nn.Linear(model.head.in_features, model.head.out_features)
+                    if "celeba" not in str(args.data_path)
+                    else AbMILPCelebAHead(model.head.in_features, 40)
+                )
             )
         elif cls_feat.startswith("attentive"):
-
             attentive = AttentiveHead(
                 embed_dim=model.head.in_features,
                 num_heads=args.attentive_heads,
@@ -370,10 +373,13 @@ def main(args):
             head = torch.nn.Sequential(
                 attentive,
                 torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-                model.head
+                nn.Linear(model.head.in_features, model.head.out_features)
             )
         else:
-            head = torch.nn.Sequential(torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6), model.head)
+            head = torch.nn.Sequential(
+                torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+                nn.Linear(model.head.in_features, model.head.out_features)
+            )
 
         heads[cls_feat] = head
 

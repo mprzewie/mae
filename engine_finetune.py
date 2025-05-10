@@ -83,7 +83,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 assert args.cls_features == list(outputs.keys())[0]
 
 
-            loss_total = 0
+            loss_total = None
+
             for key, output in outputs.items():
                 loss = criterion(output, targets)
 
@@ -103,7 +104,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 metrics[f"{key}/loss"] = loss.item()
                 metric_logger.update(**metrics)
 
-                loss_total = loss_total + loss
+                loss_total = loss if loss_total is None else loss_total + loss
 
 
         loss_value = loss_total.item()
