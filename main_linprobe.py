@@ -211,8 +211,8 @@ def main(args):
         dataset_val = Flowers102(args.data_path, split="test", transform=transform_val, download=True)
 
     elif "cars" in str(args.data_path):
-        dataset_train = StanfordCars(args.data_path, "train", transform=transform_train, download=True)
-        dataset_val = StanfordCars(args.data_path, "test", transform=transform_val, download=True)
+        dataset_train = StanfordCars(args.data_path, "train", transform=transform_train, download=False)
+        dataset_val = StanfordCars(args.data_path, "test", transform=transform_val, download=False)
     elif "aircraft" in str(args.data_path):
         dataset_train = FGVCAircraft(args.data_path, "train", transform=transform_train, download=True)
         dataset_val = FGVCAircraft(args.data_path, "test", transform=transform_val, download=True)
