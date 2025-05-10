@@ -12,6 +12,8 @@
 import argparse
 import datetime
 import json
+from collections import defaultdict
+
 import numpy as np
 import os
 import time
@@ -430,7 +432,8 @@ def main(args):
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
-    max_accuracy = 0.0
+    # max_accuracy = 0.0
+    max_stuff = defaultdict(float)
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -453,14 +456,11 @@ def main(args):
                 args=args, model=model, model_without_ddp=model_without_ddp.head, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch, test_stats=log_stats, include_epoch_in_filename=False)
 
-        if "acc1" in test_stats:
-            print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-            max_accuracy = max(max_accuracy, test_stats["acc1"])
-            print(f'Max accuracy: {max_accuracy:.2f}%')
-        else:
-            print(f"F1 of the network on the {len(dataset_val)} test images: {test_stats['f1']:.1f}%")
-            max_accuracy = max(max_accuracy, test_stats["f1"])
-            print(f'Max accuracy: {max_accuracy:.2f}%')
+        for k, v in test_stats.items():
+            if "acc1" in k or "f1" in k:
+                max_v = max(max_stuff[k], v)
+                print(f"{k} of the network on the {len(dataset_val)} test images: {v:.2f}% | Max: {max_v:.2f}%")
+                max_stuff[k] = max_v
 
         if log_writer is not None:
             for fold, stats in [
