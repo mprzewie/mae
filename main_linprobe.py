@@ -481,7 +481,6 @@ def main(args):
                         suffix = f"_{cft}"
 
                     log_writer.add_scalar(f'test_v1{suffix}/{fold}_{mtr}', v, epoch)
-                    print("logging", f'test_v1{suffix}/{fold}_{mtr}', v, epoch)
 
 
     total_time = time.time() - start_time

@@ -83,11 +83,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 assert args.cls_features == list(outputs.keys())[0]
 
 
-            loss_total = None
+            loss = 0
 
             for key, output in outputs.items():
-                loss = criterion(output, targets)
-
+                key_loss = criterion(output, targets)
                 if len(targets.shape) == 1:
                     acc1, acc5 = accuracy(output, targets, topk=(1, 5))
                     metrics = {
@@ -101,13 +100,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                         f"{key}/rec": rec.item(),
                         f"{key}/f1": f1.item(),
                     }
-                metrics[f"{key}/loss"] = loss.item()
+                metrics[f"{key}/loss"] = key_loss.item()
                 metric_logger.update(**metrics)
 
-                loss_total = loss if loss_total is None else loss_total + loss
+                loss += key_loss
 
-
-        loss_value = loss_total.item()
+        loss_value = loss.item()
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
