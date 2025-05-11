@@ -519,7 +519,7 @@ class CAPIEncoderDecoder(nn.Module):
         rets = dict(
             abmilp=enc_out_padded,
             attentive=enc_out_padded,
-            cls=torch.zeros(b, 1, e).to(dtype=enc_out.dtype, device=enc_out.device),
+            cls=torch.zeros(b, e).to(dtype=enc_out.dtype, device=enc_out.device),
             pos=enc_out.mean(dim=1)
         )
         rets = {k:v for (k,v) in rets.items() if k in return_features}
