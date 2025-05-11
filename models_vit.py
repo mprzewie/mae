@@ -221,14 +221,15 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
 
     def forward_features(
-            self, x, shuffle_subsets: int = 1, return_features: str = "cls",
+            self, x, shuffle_subsets: int = 1, return_features: List[str] = None,
             *,
             attn_temperature: float = 1.,
             return_final_attn: bool = False,
             return_block: Optional[int] = None
     ):
+        return_features = return_features or ["cls"]
         if self.global_pool != "token":
-            assert return_features in ["cls", "raw", "pos"]
+            assert all([r in ["cls", "abmilp", "pos", "attentive"] for r in return_features]), return_features
 
         return_block = return_block or len(self.blocks) - 1
         # assert shuffle_subsets == 1, shuffle_subsets
