@@ -363,7 +363,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
                 ret = torch.concat([x_cls, x_pos], dim=2)
             elif retf.startswith("cp"):
                 assert shuffle_subsets==1
-                cp = int(return_features.split("cp")[1])
+                cp = int(retf.split("cp")[1])
                 B, SS, T1, D = x_n_s_cl_d.shape
                 x_n_cl_d = x_n_s_cl_d[:, 0]
                 fm = x_n_cl_d[:, 1:]
@@ -381,7 +381,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
             elif retf.startswith("ca"):
                 assert shuffle_subsets==1
-                ca = int(return_features.split("ca")[1])
+                ca = int(retf.split("ca")[1])
                 B, SS, T1, D = x_n_s_cl_d.shape
                 x_n_cl_d = x_n_s_cl_d[:, 0]
                 fm = x_n_cl_d[:, 1:]
@@ -467,7 +467,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
                 bg_std = bg_var.sqrt()
                 bg_std_m = bg_std.mean(dim=2)
 
-                if return_features.endswith("-f"):
+                if retf.endswith("-f"):
                     flip = (bg_std_m > fg_std_m).squeeze()
                     bipartition[flip] = 1 - bipartition[flip]
                     eigen[flip] = -eigen[flip]
@@ -476,7 +476,7 @@ class VisionTransformer(timm.models.vision_transformer.VisionTransformer):
 
                 eigen_softmax = torch.nn.functional.softmax(eigen)
 
-                method = return_features.split("-")[1]
+                method = retf.split("-")[1]
                 if method == "eigsft": # in return_features:
                     mul = eigen_softmax
                 elif method =="eigbip": # in return_features:
