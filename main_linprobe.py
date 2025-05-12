@@ -13,6 +13,7 @@ import argparse
 import datetime
 import json
 from collections import defaultdict
+from typing import List
 
 import numpy as np
 import os
@@ -219,26 +220,24 @@ def main(args):
         dataset_val = FGVCAircraft(args.data_path, "test", transform=transform_val, download=True)
 
     elif "coco" in str(args.data_path):
-        pass
-        # def instances_to_multilabel_vector(instances: List[dict], vector_size: int = 91):
-        #     vector = torch.zeros(vector_size)
-        #     for i in instances:
-        #         vector[i["category_id"]] = 1
-        #     return vector
-        #
-        # assert False, "TODO"
-        # train_set = CocoDetection(
-        #     root="train2014", annFile="annotations/instances_train2014.json",
-        #     target_transform=instances_to_multilabel_vector,
-        #     transform=transform_train,
-        #     )
-        #
-        #
-        # val_set = CocoDetection(
-        #     root="val2014", annFile="annotations/instances_val2014.json",
-        #     target_transform=instances_to_multilabel_vector,
-        #     transform=transform_val,
-        # )
+        def instances_to_multilabel_vector(instances: List[dict], vector_size: int = 91):
+            vector = torch.zeros(vector_size)
+            for i in instances:
+                vector[i["category_id"]] = 1
+            return vector
+
+        dataset_train = CocoDetection(
+            root=str(args.data_path / "train2017"), annFile="annotations/instances_train2017.json",
+            target_transform=instances_to_multilabel_vector,
+            transform=transform_train,
+            )
+
+
+        dataset_val = CocoDetection(
+            root=str(args.data_path / "val2017"), annFile="annotations/instances_val2017.json",
+            target_transform=instances_to_multilabel_vector,
+            transform=transform_val,
+        )
 
     elif "nuswide" in str(args.data_path):
         dataset_train = NUSWideDataset(
