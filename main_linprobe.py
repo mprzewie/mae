@@ -477,7 +477,7 @@ def main(args):
 
     if any([
         substr in str(args.data_path)
-        for substr in ["celeba", "nuswide"]
+        for substr in ["celeba", "nuswide", "coco"]
     ]):
         print(f"Training with BCE bc the dataset is {args.data_path}.")
         criterion = lambda outputs, targets: (
