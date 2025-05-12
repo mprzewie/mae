@@ -54,7 +54,6 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     dtype = AMP_PRECISIONS[args.amp]
 
     for data_iter_step, (samples, targets) in tqdm(enumerate(metric_logger.log_every(data_loader, print_freq, header))):
-
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
@@ -275,7 +274,7 @@ def draw_mae_predictions(dataset, model: MaskedAutoencoderViT, device):
 
 @torch.no_grad()
 def bin_cls_metrics(inputs, targets):
-    pred = (inputs[:, :40] > 0).long().cpu().numpy()
+    pred = (inputs[:, :targets.shape[1]] > 0).long().cpu().numpy()
     targets = targets.cpu().numpy()
 
 

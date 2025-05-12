@@ -33,7 +33,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import timm
-from torchvision.datasets import STL10, OxfordIIITPet, Flowers102, StanfordCars, FGVCAircraft
+from torchvision.datasets import STL10, OxfordIIITPet, Flowers102, StanfordCars, FGVCAircraft, CocoDetection
 
 import models_simmim
 import models_vits_dinov2
@@ -46,6 +46,7 @@ from attentive import AttentiveHead
 from engine_pretrain import AMP_PRECISIONS
 from manyhead import AllClassifiers
 from models_vit import CLS_FT_CHOICES
+from util.nuswide import NUSWideDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.lars import LARS
@@ -441,9 +442,19 @@ def main(args):
     print(optimizer)
     loss_scaler = NativeScaler()
 
-    if "celeba" in str(args.data_path):
-        criterion = lambda outputs, targets: torch.nn.functional.binary_cross_entropy_with_logits(outputs[:, :40], targets.float())
+    if any([
+        substr in str(args.data_path)
+        for substr in ["celeba", "nuswide"]
+    ]):
+        print(f"Training with BCE bc the dataset is {args.data_path}.")
+        criterion = lambda outputs, targets: (
+            torch.nn.functional.binary_cross_entropy_with_logits(
+                outputs[:, :targets.shape[1]],
+                targets.float()
+            )
+        )
     else:
+        print("Trainig with CE.")
         criterion = nn.CrossEntropyLoss()
 
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
