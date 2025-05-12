@@ -218,6 +218,40 @@ def main(args):
         dataset_train = FGVCAircraft(args.data_path, "train", transform=transform_train, download=True)
         dataset_val = FGVCAircraft(args.data_path, "test", transform=transform_val, download=True)
 
+    elif "coco" in str(args.data_path):
+        pass
+        # def instances_to_multilabel_vector(instances: List[dict], vector_size: int = 91):
+        #     vector = torch.zeros(vector_size)
+        #     for i in instances:
+        #         vector[i["category_id"]] = 1
+        #     return vector
+        #
+        # assert False, "TODO"
+        # train_set = CocoDetection(
+        #     root="train2014", annFile="annotations/instances_train2014.json",
+        #     target_transform=instances_to_multilabel_vector,
+        #     transform=transform_train,
+        #     )
+        #
+        #
+        # val_set = CocoDetection(
+        #     root="val2014", annFile="annotations/instances_val2014.json",
+        #     target_transform=instances_to_multilabel_vector,
+        #     transform=transform_val,
+        # )
+
+    elif "nuswide" in str(args.data_path):
+        dataset_train = NUSWideDataset(
+            root=args.data_path,
+            set="trainval",
+            transform=transform_train,
+        )
+
+        dataset_val = NUSWideDataset(
+            root=args.data_path,
+            set="test",
+            transform=transform_val,
+        )
     else:
         dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
         dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
