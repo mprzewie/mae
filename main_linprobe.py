@@ -227,14 +227,14 @@ def main(args):
             return vector
 
         dataset_train = CocoDetection(
-            root=str(args.data_path / "train2017"), annFile="annotations/instances_train2017.json",
+            root=str(args.data_path / "train2017"), annFile=str(args.data_path /"annotations/instances_train2017.json"),
             target_transform=instances_to_multilabel_vector,
             transform=transform_train,
             )
 
 
         dataset_val = CocoDetection(
-            root=str(args.data_path / "val2017"), annFile="annotations/instances_val2017.json",
+            root=str(args.data_path / "val2017"), annFile=str(args.data_path /"annotations/instances_val2017.json"),
             target_transform=instances_to_multilabel_vector,
             transform=transform_val,
         )
