@@ -34,7 +34,8 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import timm
-from torchvision.datasets import STL10, OxfordIIITPet, Flowers102, StanfordCars, FGVCAircraft, CocoDetection
+from torchvision.datasets import STL10, OxfordIIITPet, Flowers102, StanfordCars, FGVCAircraft, CocoDetection, Food101, \
+    DTD
 
 import models_simmim
 import models_vits_dinov2
@@ -163,6 +164,7 @@ def get_args_parser():
 
     parser.add_argument("--abmilp_content", type=str, choices=["all", "patch"], default="all")
     parser.add_argument("--attentive_heads", type=int, default=12)
+    parser.add_argument("--abmilp_ablate", action="store_true", default=False,)
 
     parser.add_argument("--suffix", type=str, default="")
 
@@ -211,7 +213,12 @@ def main(args):
     elif "flowers" in str(args.data_path):
         dataset_train = Flowers102(args.data_path, split="train", transform=transform_train, download=True)
         dataset_val = Flowers102(args.data_path, split="test", transform=transform_val, download=True)
-
+    elif "food" in str(args.data_path):
+        dataset_train   = Food101(root=args.data_path, split='train', transform=transform_train, download=True)
+        dataset_val = Food101(root=args.data_path, split='test',  transform=transform_val, download=True)
+    elif 'dtd' in str(args.data_path):
+        dataset_train = DTD(root=args.data_path, split='train', transform=transform_train, download=True)
+        dataset_val  = DTD(root=args.data_path, split='test', transform=transform_val, download=True)
     elif "cars" in str(args.data_path):
         dataset_train = StanfordCars(args.data_path, "train", transform=transform_train, download=False)
         dataset_val = StanfordCars(args.data_path, "test", transform=transform_val, download=False)
@@ -366,10 +373,10 @@ def main(args):
             # assert False
 
         state_dict = model.state_dict()
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+        for abmilp_hparam_id in ['head.weight', 'head.bias']:
+            if abmilp_hparam_id in checkpoint_model and checkpoint_model[abmilp_hparam_id].shape != state_dict[abmilp_hparam_id].shape:
+                print(f"Removing key {abmilp_hparam_id} from pretrained checkpoint")
+                del checkpoint_model[abmilp_hparam_id]
 
         # interpolate position embedding
         try:
@@ -396,28 +403,34 @@ def main(args):
     heads = dict()
     for cls_feat in args.cls_features:
         if cls_feat.startswith("abmilp"):
-            for depth in range(1, 5):
-                for act in ["relu", "gelu", "tanh"]:
-                    abmilp = ABMILPHead(
-                            dim=model.head.in_features,
-                            self_attention_apply_to=args.abmilp_sa,
-                            activation=act,
-                            depth=depth,
-                            cond=args.abmilp_cond,
-                            content=args.abmilp_content,
-                            num_patches=model.patch_embed.num_patches,
-                            num_heads=args.attentive_heads,
-                            attention_branches=40 if "celeba" in str(args.data_path) else 1
-                        )
-                    heads[f"abmilp:{depth}:{act}"] = torch.nn.Sequential(
-                        abmilp,
-                        torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-                        (
-                            nn.Linear(model.head.in_features, model.head.out_features)
-                            if "celeba" not in str(args.data_path)
-                            else AbMILPCelebAHead(model.head.in_features, 40)
-                        )
+            abmilp_hparams = dict()
+            if args.abmilp_ablate:
+                for depth in range(1, 5):
+                    for act in ["relu", "gelu", "tanh"]:
+                        abmilp_hparams[f"abmilp:{depth}:{act}"] = dict(depth=depth, activation=act)
+            else:
+                abmilp_hparams["abmilp"] = dict(depth=args.abmilp_depth, activation=args.abmilp_act)
+
+            for abmilp_hparam_id, hparams_dct in abmilp_hparams.items():
+                abmilp = ABMILPHead(
+                        dim=model.head.in_features,
+                        self_attention_apply_to=args.abmilp_sa,
+                        cond=args.abmilp_cond,
+                        content=args.abmilp_content,
+                        num_patches=model.patch_embed.num_patches,
+                        num_heads=args.attentive_heads,
+                        attention_branches=40 if "celeba" in str(args.data_path) else 1,
+                        **hparams_dct,
                     )
+                heads[abmilp_hparam_id] = torch.nn.Sequential(
+                    abmilp,
+                    torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+                    (
+                        nn.Linear(model.head.in_features, model.head.out_features)
+                        if "celeba" not in str(args.data_path)
+                        else AbMILPCelebAHead(model.head.in_features, 40)
+                    )
+                )
         elif cls_feat.startswith("attentive"):
             attentive = AttentiveHead(
                 embed_dim=model.head.in_features,
@@ -524,25 +537,25 @@ def main(args):
                 args=args, model=model, model_without_ddp=model_without_ddp.head, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch, test_stats=log_stats, include_epoch_in_filename=False)
 
-        for k, v in test_stats.items():
-            if "acc1" in k or "f1" in k:
-                max_v = max(max_stuff[k], v)
-                print(f"{k} of the network on the {len(dataset_val)} test images: {v:.2f}% | Max: {max_v:.2f}%")
-                max_stuff[k] = max_v
+        for abmilp_hparam_id, hparams_dct in test_stats.items():
+            if "acc1" in abmilp_hparam_id or "f1" in abmilp_hparam_id:
+                max_v = max(max_stuff[abmilp_hparam_id], hparams_dct)
+                print(f"{abmilp_hparam_id} of the network on the {len(dataset_val)} test images: {hparams_dct:.2f}% | Max: {max_v:.2f}%")
+                max_stuff[abmilp_hparam_id] = max_v
 
         if log_writer is not None:
             for fold, stats in [
                 ("train", train_stats),
                 ("test", test_stats),
             ]:
-                for k, v in stats.items():
+                for abmilp_hparam_id, hparams_dct in stats.items():
                     suffix = ""
-                    mtr = k
-                    if "/" in k:
-                        cft, mtr = k.split("/")
+                    mtr = abmilp_hparam_id
+                    if "/" in abmilp_hparam_id:
+                        cft, mtr = abmilp_hparam_id.split("/")
                         suffix = f"_{cft}"
 
-                    log_writer.add_scalar(f'test_v1{suffix}/{fold}_{mtr}', v, epoch)
+                    log_writer.add_scalar(f'test_v1{suffix}/{fold}_{mtr}', hparams_dct, epoch)
 
 
     total_time = time.time() - start_time
