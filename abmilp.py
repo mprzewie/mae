@@ -45,7 +45,7 @@ class ABMILPHead(nn.Module):
         for i in range(depth-1):
             attn_pred_layers.extend([
                 nn.Linear(dim, dim),
-                (nn.Tanh() if activation == "tanh" else nn.ReLU()),
+                (nn.Tanh() if activation == "tanh" else nn.ReLU() if activation == "relu" else nn.GELU()),
             ])
 
         attn_pred_layers.append(nn.Linear(dim, attention_branches))

@@ -396,43 +396,44 @@ def main(args):
     heads = dict()
     for cls_feat in args.cls_features:
         if cls_feat.startswith("abmilp"):
-            abmilp = ABMILPHead(
-                    dim=model.head.in_features,
-                    self_attention_apply_to=args.abmilp_sa,
-                    activation=args.abmilp_act,
-                    depth=args.abmilp_depth,
-                    cond=args.abmilp_cond,
-                    content=args.abmilp_content,
-                    num_patches=model.patch_embed.num_patches,
-                    num_heads=args.attentive_heads,
-                    attention_branches=40 if "celeba" in str(args.data_path) else 1
-                )
-            head = torch.nn.Sequential(
-                abmilp,
-                torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-                (
-                    nn.Linear(model.head.in_features, model.head.out_features)
-                    if "celeba" not in str(args.data_path)
-                    else AbMILPCelebAHead(model.head.in_features, 40)
-                )
-            )
+            for depth in range(1, 5):
+                for act in ["relu", "gelu", "tanh"]:
+                    abmilp = ABMILPHead(
+                            dim=model.head.in_features,
+                            self_attention_apply_to=args.abmilp_sa,
+                            activation=act,
+                            depth=depth,
+                            cond=args.abmilp_cond,
+                            content=args.abmilp_content,
+                            num_patches=model.patch_embed.num_patches,
+                            num_heads=args.attentive_heads,
+                            attention_branches=40 if "celeba" in str(args.data_path) else 1
+                        )
+                    heads[f"abmilp:{depth}:{act}"] = torch.nn.Sequential(
+                        abmilp,
+                        torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+                        (
+                            nn.Linear(model.head.in_features, model.head.out_features)
+                            if "celeba" not in str(args.data_path)
+                            else AbMILPCelebAHead(model.head.in_features, 40)
+                        )
+                    )
         elif cls_feat.startswith("attentive"):
             attentive = AttentiveHead(
                 embed_dim=model.head.in_features,
                 num_heads=args.attentive_heads,
             )
-            head = torch.nn.Sequential(
+            heads[cls_feat]  = torch.nn.Sequential(
                 attentive,
                 torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
                 nn.Linear(model.head.in_features, model.head.out_features)
             )
         else:
-            head = torch.nn.Sequential(
+            heads[cls_feat]  = torch.nn.Sequential(
                 torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
                 nn.Linear(model.head.in_features, model.head.out_features)
             )
 
-        heads[cls_feat] = head
 
     model.head = AllClassifiers(heads)
 

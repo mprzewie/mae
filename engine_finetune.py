@@ -76,7 +76,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 outputs = model(samples)
 
             if isinstance(args.cls_features, list):
-                assert set(args.cls_features) == outputs.keys()
+                cleaned_of = set([("abmilp" if c.startswith("abmilp") else c) for c in outputs.keys()])
+                assert set(args.cls_features) == cleaned_of, (set(args.cls_features), outputs.keys())
             else:
                 assert len(outputs) == 1
                 assert args.cls_features == list(outputs.keys())[0]
