@@ -11,5 +11,5 @@ class AllClassifiers(nn.Module):
     def forward(self, backbone_out: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return {
             key: self.classifiers[key](backbone_out[key])
-            for key in self.classifiers
+            for key in self.classifiers.keys()
         }
