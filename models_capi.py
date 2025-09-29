@@ -508,17 +508,27 @@ class CAPIEncoderDecoder(nn.Module):
         #     w // self.patch_size,
         #     self.embed_dim,
         # )
-        if return_features in ["abmilp", "attentive", "raw"]:
-            b, t, e = enc_out.shape
-            enc_out_padded = torch.cat([
-                torch.zeros(b, 1, e).to(dtype=enc_out.dtype, device=enc_out.device),
-                enc_out[:, self.num_prefix_tokens:], # just the patches, no registers
-            ], dim=1)
+        # if return_features in ["abmilp", "attentive", "raw"]:
+        b, t, e = enc_out.shape
+        enc_out_padded = torch.cat([
+            torch.zeros(b, 1, e).to(dtype=enc_out.dtype, device=enc_out.device),
+            enc_out[:, self.num_prefix_tokens:], # just the patches, no registers
+        ], dim=1)
             # pad the encoder output to simulate the [cls] token
-            return self.head(enc_out_padded)
-        elif return_features == "pos":
-            return self.head(enc_out.mean(dim=1))
-        assert False, return_features
+
+        rets = dict(
+            abmilp=enc_out_padded,
+            attentive=enc_out_padded,
+            cls=torch.zeros(b, e).to(dtype=enc_out.dtype, device=enc_out.device),
+            pos=enc_out.mean(dim=1)
+        )
+        rets = {k:v for (k,v) in rets.items() if k in return_features}
+        return self.head(rets)
+
+        #     return self.head()
+        # elif return_features == "pos":
+        #     return self.head(enc_out.mean(dim=1))
+        # assert False, return_features
         # return (global_repr, registers, feature_map)
 
 

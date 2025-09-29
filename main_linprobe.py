@@ -13,6 +13,7 @@ import argparse
 import datetime
 import json
 from collections import defaultdict
+from typing import List
 
 import numpy as np
 import os
@@ -27,12 +28,14 @@ from torch import nn
 from torch.hub import load_state_dict_from_url
 from torch.optim import SGD
 from torch.optim.adamw import AdamW
+from torch.utils.data import random_split
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import timm
-from torchvision.datasets import STL10
+from torchvision.datasets import STL10, OxfordIIITPet, Flowers102, StanfordCars, FGVCAircraft, CocoDetection, Food101, \
+    DTD
 
 import models_simmim
 import models_vits_dinov2
@@ -45,6 +48,7 @@ from attentive import AttentiveHead
 from engine_pretrain import AMP_PRECISIONS
 from manyhead import AllClassifiers
 from models_vit import CLS_FT_CHOICES
+from util.nuswide import NUSWideDataset
 from util.pos_embed import interpolate_pos_embed
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.lars import LARS
@@ -160,6 +164,7 @@ def get_args_parser():
 
     parser.add_argument("--abmilp_content", type=str, choices=["all", "patch"], default="all")
     parser.add_argument("--attentive_heads", type=int, default=12)
+    parser.add_argument("--abmilp_ablate", action="store_true", default=False,)
 
     parser.add_argument("--suffix", type=str, default="")
 
@@ -200,6 +205,59 @@ def main(args):
     elif "celeba" in  str(args.data_path):
         dataset_train = datasets.CelebA(root=args.data_path, split="train", transform=transform_train, download=False)
         dataset_val = datasets.CelebA(root=args.data_path, split="test", transform=transform_val, download=False)
+    elif "pets" in str(args.data_path):
+        generator = lambda seed: torch.Generator().manual_seed(seed)
+        trainval = OxfordIIITPet(root=args.data_path, split='trainval', transform=transform_train, download=True)
+        dataset_train, _ = random_split(trainval, [2940, 740], generator=generator(49))
+        dataset_val = OxfordIIITPet(root=args.data_path, split='test', transform=transform_val, download=True)
+    elif "flowers" in str(args.data_path):
+        dataset_train = Flowers102(args.data_path, split="train", transform=transform_train, download=True)
+        dataset_val = Flowers102(args.data_path, split="test", transform=transform_val, download=True)
+    elif "food" in str(args.data_path):
+        dataset_train   = Food101(root=args.data_path, split='train', transform=transform_train, download=True)
+        dataset_val = Food101(root=args.data_path, split='test',  transform=transform_val, download=True)
+    elif 'dtd' in str(args.data_path):
+        dataset_train = DTD(root=args.data_path, split='train', transform=transform_train, download=True)
+        dataset_val  = DTD(root=args.data_path, split='test', transform=transform_val, download=True)
+    elif "cars" in str(args.data_path):
+        dataset_train = StanfordCars(args.data_path, "train", transform=transform_train, download=False)
+        dataset_val = StanfordCars(args.data_path, "test", transform=transform_val, download=False)
+    elif "aircraft" in str(args.data_path):
+        dataset_train = FGVCAircraft(args.data_path, "train", transform=transform_train, download=True)
+        dataset_val = FGVCAircraft(args.data_path, "test", transform=transform_val, download=True)
+
+    elif "coco" in str(args.data_path):
+        def instances_to_multilabel_vector(instances: List[dict], vector_size: int = 91):
+            vector = torch.zeros(vector_size)
+            for i in instances:
+                vector[i["category_id"]] = 1
+            return vector
+
+        dataset_train = CocoDetection(
+            root=str(args.data_path / "train2017"), annFile=str(args.data_path /"annotations/instances_train2017.json"),
+            target_transform=instances_to_multilabel_vector,
+            transform=transform_train,
+            )
+
+
+        dataset_val = CocoDetection(
+            root=str(args.data_path / "val2017"), annFile=str(args.data_path /"annotations/instances_val2017.json"),
+            target_transform=instances_to_multilabel_vector,
+            transform=transform_val,
+        )
+
+    elif "nuswide" in str(args.data_path):
+        dataset_train = NUSWideDataset(
+            root=args.data_path,
+            set="trainval",
+            transform=transform_train,
+        )
+
+        dataset_val = NUSWideDataset(
+            root=args.data_path,
+            set="test",
+            transform=transform_val,
+        )
     else:
         dataset_train = datasets.ImageFolder(args.data_path / 'train', transform=transform_train)
         dataset_val = datasets.ImageFolder(args.data_path / 'val', transform=transform_val)
@@ -315,10 +373,10 @@ def main(args):
             # assert False
 
         state_dict = model.state_dict()
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint_model[k]
+        for abmilp_hparam_id in ['head.weight', 'head.bias']:
+            if abmilp_hparam_id in checkpoint_model and checkpoint_model[abmilp_hparam_id].shape != state_dict[abmilp_hparam_id].shape:
+                print(f"Removing key {abmilp_hparam_id} from pretrained checkpoint")
+                del checkpoint_model[abmilp_hparam_id]
 
         # interpolate position embedding
         try:
@@ -345,43 +403,50 @@ def main(args):
     heads = dict()
     for cls_feat in args.cls_features:
         if cls_feat.startswith("abmilp"):
-            abmilp = ABMILPHead(
-                    dim=model.head.in_features,
-                    self_attention_apply_to=args.abmilp_sa,
-                    activation=args.abmilp_act,
-                    depth=args.abmilp_depth,
-                    cond=args.abmilp_cond,
-                    content=args.abmilp_content,
-                    num_patches=model.patch_embed.num_patches,
-                    num_heads=args.attentive_heads,
-                    attention_branches=40 if "celeba" in str(args.data_path) else 1
+            abmilp_hparams = dict()
+            if args.abmilp_ablate:
+                for depth in range(1, 5):
+                    for act in ["relu", "gelu", "tanh"]:
+                        abmilp_hparams[f"abmilp:{depth}:{act}"] = dict(depth=depth, activation=act)
+            else:
+                abmilp_hparams["abmilp"] = dict(depth=args.abmilp_depth, activation=args.abmilp_act)
+
+            for abmilp_hparam_id, hparams_dct in abmilp_hparams.items():
+                abmilp = ABMILPHead(
+                        dim=model.head.in_features,
+                        self_attention_apply_to=args.abmilp_sa,
+                        cond=args.abmilp_cond,
+                        content=args.abmilp_content,
+                        num_patches=model.patch_embed.num_patches,
+                        num_heads=args.attentive_heads,
+                        attention_branches=40 if "celeba" in str(args.data_path) else 1,
+                        **hparams_dct,
+                    )
+                heads[abmilp_hparam_id] = torch.nn.Sequential(
+                    abmilp,
+                    torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
+                    (
+                        nn.Linear(model.head.in_features, model.head.out_features)
+                        if "celeba" not in str(args.data_path)
+                        else AbMILPCelebAHead(model.head.in_features, 40)
+                    )
                 )
-            head = torch.nn.Sequential(
-                abmilp,
-                torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
-                (
-                    nn.Linear(model.head.in_features, model.head.out_features)
-                    if "celeba" not in str(args.data_path)
-                    else AbMILPCelebAHead(model.head.in_features, 40)
-                )
-            )
         elif cls_feat.startswith("attentive"):
             attentive = AttentiveHead(
                 embed_dim=model.head.in_features,
                 num_heads=args.attentive_heads,
             )
-            head = torch.nn.Sequential(
+            heads[cls_feat]  = torch.nn.Sequential(
                 attentive,
                 torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
                 nn.Linear(model.head.in_features, model.head.out_features)
             )
         else:
-            head = torch.nn.Sequential(
+            heads[cls_feat]  = torch.nn.Sequential(
                 torch.nn.BatchNorm1d(model.head.in_features, affine=False, eps=1e-6),
                 nn.Linear(model.head.in_features, model.head.out_features)
             )
 
-        heads[cls_feat] = head
 
     model.head = AllClassifiers(heads)
 
@@ -424,9 +489,19 @@ def main(args):
     print(optimizer)
     loss_scaler = NativeScaler()
 
-    if "celeba" in str(args.data_path):
-        criterion = lambda outputs, targets: torch.nn.functional.binary_cross_entropy_with_logits(outputs[:, :40], targets.float())
+    if any([
+        substr in str(args.data_path)
+        for substr in ["celeba", "nuswide", "coco"]
+    ]):
+        print(f"Training with BCE bc the dataset is {args.data_path}.")
+        criterion = lambda outputs, targets: (
+            torch.nn.functional.binary_cross_entropy_with_logits(
+                outputs[:, :targets.shape[1]],
+                targets.float()
+            )
+        )
     else:
+        print("Trainig with CE.")
         criterion = nn.CrossEntropyLoss()
 
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
@@ -462,26 +537,25 @@ def main(args):
                 args=args, model=model, model_without_ddp=model_without_ddp.head, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch, test_stats=log_stats, include_epoch_in_filename=False)
 
-        for k, v in test_stats.items():
-            if "acc1" in k or "f1" in k:
-                max_v = max(max_stuff[k], v)
-                print(f"{k} of the network on the {len(dataset_val)} test images: {v:.2f}% | Max: {max_v:.2f}%")
-                max_stuff[k] = max_v
+        for abmilp_hparam_id, hparams_dct in test_stats.items():
+            if "acc1" in abmilp_hparam_id or "f1" in abmilp_hparam_id:
+                max_v = max(max_stuff[abmilp_hparam_id], hparams_dct)
+                print(f"{abmilp_hparam_id} of the network on the {len(dataset_val)} test images: {hparams_dct:.2f}% | Max: {max_v:.2f}%")
+                max_stuff[abmilp_hparam_id] = max_v
 
         if log_writer is not None:
             for fold, stats in [
                 ("train", train_stats),
                 ("test", test_stats),
             ]:
-                for k, v in stats.items():
+                for abmilp_hparam_id, hparams_dct in stats.items():
                     suffix = ""
-                    mtr = k
-                    if "/" in k:
-                        cft, mtr = k.split("/")
+                    mtr = abmilp_hparam_id
+                    if "/" in abmilp_hparam_id:
+                        cft, mtr = abmilp_hparam_id.split("/")
                         suffix = f"_{cft}"
 
-                    log_writer.add_scalar(f'test_v1{suffix}/{fold}_{mtr}', v, epoch)
-                    print("logging", f'test_v1{suffix}/{fold}_{mtr}', v, epoch)
+                    log_writer.add_scalar(f'test_v1{suffix}/{fold}_{mtr}', hparams_dct, epoch)
 
 
     total_time = time.time() - start_time

@@ -10,6 +10,6 @@ class AllClassifiers(nn.Module):
 
     def forward(self, backbone_out: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return {
-            key: self.classifiers[key](backbone_out[key])
+            key: self.classifiers[key](backbone_out[("abmilp" if key.startswith("abmilp") else key)])
             for key in self.classifiers.keys()
         }
